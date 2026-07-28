@@ -2,7 +2,12 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # This repo's default branch is currently the feature branch, and there is
+    # no `main` yet. Both are listed so deploys keep working after a rename or
+    # a merge, rather than silently never firing again.
+    branches:
+      - main
+      - claude/audio-reactive-visualizer-xk67fi
   workflow_dispatch:
 
 permissions:
