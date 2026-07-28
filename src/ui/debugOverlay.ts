@@ -41,7 +41,12 @@ export class DebugScope {
     return { width: rect.width, height: rect.height }
   }
 
-  draw(signal: Signal, debug: AudioDebug | null, sourceLabel: string): void {
+  draw(
+    signal: Signal,
+    debug: AudioDebug | null,
+    sourceLabel: string,
+    luminance?: { measured: number; allowed: number; gain: number } | null,
+  ): void {
     const ctx = this.ctx
     if (!ctx) return
 
@@ -90,6 +95,14 @@ export class DebugScope {
         'mood',
         `e${signal.mood.energy.toFixed(2)} w${signal.mood.warmth.toFixed(2)} ` +
           `c${signal.mood.contrast.toFixed(2)} d${signal.mood.density.toFixed(2)}`,
+      ],
+      // gain below 1 means the limiter is actively holding a flash back.
+      [
+        'luma',
+        luminance
+          ? `${luminance.measured.toFixed(3)} -> ${luminance.allowed.toFixed(3)}  ` +
+            `gain ${luminance.gain.toFixed(2)}`
+          : 'n/a',
       ],
     ]
     for (const [label, value] of lines) {

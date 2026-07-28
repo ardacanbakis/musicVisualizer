@@ -17,6 +17,8 @@ import { MODES, createMode } from './render/registry'
 import type { VisualMode } from './render/types'
 import { resolveParams, useSettings } from './store/settings'
 import { DebugScope } from './ui/debugOverlay'
+import { ParamPanel } from './ui/ParamPanel'
+import { modeEntry } from './render/registry'
 
 type MicState = 'off' | 'requesting' | 'on' | 'denied' | 'unsupported'
 
@@ -38,6 +40,11 @@ export function App() {
   const toggleDebug = useSettings((s) => s.toggleDebug)
   const setMode = useSettings((s) => s.setMode)
   const setPalette = useSettings((s) => s.setPalette)
+  const setParam = useSettings((s) => s.setParam)
+  const resetParams = useSettings((s) => s.resetParams)
+
+  const entry = modeEntry(modeId)
+  const params = resolveParams(modeId, savedParams)
 
   const [micState, setMicState] = useState<MicState>('off')
   const [sourceLabel, setSourceLabel] = useState('Synthetic')
@@ -54,6 +61,15 @@ export function App() {
 
     bus.setPalette(paletteById(useSettings.getState().paletteId), true)
 
+    // Honour the OS setting, and keep honouring it if the user changes it
+    // mid-session rather than only reading it once at startup.
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const applyMotion = () => {
+      stage.reducedMotion = motionQuery.matches
+    }
+    applyMotion()
+    motionQuery.addEventListener('change', applyMotion)
+
     const applySize = () => {
       stage.setSize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1)
       modeRef.current?.resize(stage.width, stage.height, stage.dpr)
@@ -69,8 +85,11 @@ export function App() {
       raf = requestAnimationFrame(loop)
       const signal = bus.update(now)
       modeRef.current?.frame(signal, paramsRef.current)
+      // Everything the mode drew went into the scene buffer. This is what
+      // actually reaches the canvas, with the luminance clamp applied.
+      stage.present(signal.dt)
       if (debugVisibleRef.current) {
-        scopeRef.current?.draw(signal, bus.audioDebug, bus.sourceLabel)
+        scopeRef.current?.draw(signal, bus.audioDebug, bus.sourceLabel, stage.sampleLuminance())
       }
     }
     raf = requestAnimationFrame(loop)
@@ -93,6 +112,7 @@ export function App() {
       running = false
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', applySize)
+      motionQuery.removeEventListener('change', applyMotion)
       document.removeEventListener('visibilitychange', onVisibility)
       modeRef.current?.dispose()
       modeRef.current = null
@@ -112,6 +132,10 @@ export function App() {
     mode.init(stage)
     mode.resize(stage.width, stage.height, stage.dpr)
     modeRef.current = mode
+    // The incoming mode's luminance has nothing to do with the outgoing one's,
+    // so carrying the clamp state across would dim the first second of every
+    // switch for no reason.
+    stage.resetLimiter()
     return () => {
       // Disposing here as well as above is intentional: a mode swap must free
       // its GPU resources at the moment of the swap, not whenever the next one
@@ -179,7 +203,7 @@ export function App() {
       <canvas ref={canvasRef} className="block h-full w-full" />
 
       <div className="pointer-events-none absolute inset-0 p-4">
-        <div className="pointer-events-auto inline-flex flex-col gap-3 rounded-lg border border-white/10 bg-black/55 p-4 text-sm text-white/85 backdrop-blur">
+        <div className="pointer-events-auto inline-flex max-h-[calc(100vh-2rem)] w-64 flex-col gap-3 overflow-y-auto rounded-lg border border-white/10 bg-black/55 p-4 text-sm text-white/85 backdrop-blur">
           <div className="flex items-center gap-2">
             <span
               className={`h-2 w-2 rounded-full ${
@@ -248,6 +272,15 @@ export function App() {
               ))}
             </select>
           </label>
+
+          <div className="my-1 h-px bg-white/10" />
+
+          <ParamPanel
+            schema={entry.params}
+            values={params}
+            onChange={(key, value) => setParam(modeId, key, value)}
+            onReset={() => resetParams(modeId)}
+          />
 
           <p className="text-xs text-white/35">Press D for the debug scope.</p>
         </div>

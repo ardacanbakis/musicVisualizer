@@ -7,8 +7,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_MODE_ID, modeEntry } from '../render/registry'
-import { defaultParams } from '../render/types'
+import { DEFAULT_MODE_ID } from '../render/registry'
 import type { ParamValue, ParamValues } from '../render/types'
 import { DEFAULT_PALETTE } from '../signal/palettes'
 
@@ -58,17 +57,6 @@ export const useSettings = create<SettingsState>()(
   ),
 )
 
-/** Schema defaults with any saved overrides applied on top. */
-export function resolveParams(modeId: string, saved: Record<string, ParamValues>): ParamValues {
-  const schema = modeEntry(modeId).params
-  const defaults = defaultParams(schema)
-  const overrides = saved[modeId]
-  if (!overrides) return defaults
-  const merged: ParamValues = { ...defaults }
-  for (const key of Object.keys(overrides)) {
-    // Ignore stored keys the schema no longer has — otherwise a renamed param
-    // leaves dead values in localStorage forever.
-    if (key in schema) merged[key] = overrides[key]
-  }
-  return merged
-}
+// Re-exported so callers have one obvious import for "settings things".
+// The logic itself lives in render/params.ts, free of the store.
+export { resolveParams } from '../render/params'

@@ -113,6 +113,13 @@ export interface RenderContext {
   readonly height: number
   /** Device pixel ratio, already capped at 2. */
   readonly dpr: number
+  /**
+   * The user has asked for reduced motion. Modes MUST honour this with a
+   * genuinely calmer variant — slower drift, fewer respawns, longer trails —
+   * not merely a slightly lower speed. The stage already tightens the
+   * luminance limiter on top of whatever the mode does.
+   */
+  readonly reducedMotion: boolean
   /** Allocate a feedback buffer pair. The mode owns it and must dispose it. */
   createPingPong(options?: PingPongOptions): PingPong
   /**

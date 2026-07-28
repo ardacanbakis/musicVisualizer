@@ -112,11 +112,15 @@ src/
   render/
     types.ts        PUBLIC API: VisualMode, ParamSchema, RenderContext
     stage.ts        the shared WebGLRenderer, blit, ping-pong
+    luminanceLimiter.ts  the anti-strobe clamp; every frame goes through it
+    glsl.ts         shared shader snippets + the COLOUR SPACE CONVENTION
     registry.ts     one array; add a mode here
+    params.ts       schema defaults merged with saved overrides
     paletteTexture.ts  palette + band data as textures, shared by all modes
     modes/          one file per mode
   ui/
     debugOverlay.ts the debug scope (press D)
+    ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
   store/
     settings.ts     zustand + localStorage
 ```
@@ -158,13 +162,33 @@ them, because the level they compare against is a mean across all bands.
 any app created after November 2024. All rhythmic information comes from the
 microphone.
 
+## Rendering conventions
+
+**Modes work in linear light.** Every mode writes linear values into the scene
+buffer; the stage's present pass does the one and only sRGB encode. Blending,
+additive accumulation and the luminance limiter are all averaging operations,
+and averaging gamma-encoded values gives the wrong answer. Palette texels are
+8-bit sRGB tagged `NoColorSpace` — raw `ShaderMaterial`s get no automatic
+decode from three, so shaders call `ambSrgbToLinear` explicitly. Shared GLSL
+helpers are prefixed `amb` because three injects its own `luminance` and the
+names collide. See `src/render/glsl.ts`.
+
+**`ctx.blit(material, null)` does not reach the canvas.** null means the scene
+buffer. Only the luminance limiter draws to the glass, so no mode can bypass
+the clamp — that is the point of putting it in the stage rather than asking
+every mode to behave.
+
 ## Ambient behaviour requirements
 
 These are features, not polish:
 
-- No strobing. Clamp the maximum rate of full-frame luminance change, and honour
-  `prefers-reduced-motion` with a genuinely calmer variant. This runs unattended
-  in rooms with other people in them.
+- ✅ No strobing. `luminanceLimiter.ts` reduces each frame to its mean linear
+  luminance on the GPU and caps how fast that may rise (1.2/s normally, 0.45/s
+  under reduced motion). Falls freely — the hazard is the flash *to* bright,
+  and holding luminance up while a frame darkens would mean amplifying noise.
+  No CPU readback in the normal path; the debug scope can ask for one.
+- ✅ `prefers-reduced-motion` is on `RenderContext` and watched live. Modes MUST
+  give a genuinely calmer variant, not the same animation slightly slower.
 - Must survive 8+ hours without leaking. Dispose every geometry, material,
   texture and framebuffer on mode switch. Device pixel ratio is capped at 2.
 - Chrome auto-hides after 3 s of mouse idle. Screen Wake Lock so the display
@@ -190,8 +214,10 @@ the shader wrong?", and this answers it in about two seconds.
 
 1. ✅ Signal bus, synthetic LFO source, trivial renderer (colour bars)
 2. ✅ Microphone pipeline, debug overlay
-3. Mode registry, auto-generated param UI, flow field
+3. ✅ Mode registry, auto-generated param UI, flow field
+   (luminance clamp and reduced-motion pulled forward from 6, so every mode
+   from here is built against them rather than retrofitted)
 4. Reaction-diffusion, geometric tiling, 3D terrain, fireplace, lava lamp
 5. Spotify auth, polling, palette extraction, crossfade
-6. Ambient shell — fullscreen, auto-hide, wake lock, auto-rotate, reduced motion
+6. Ambient shell — fullscreen, auto-hide, wake lock, auto-rotate
 7. Frame capture and high-resolution still export

@@ -9,11 +9,12 @@
  * GPU work belongs in `init()`.
  */
 import { createBarsMode } from './modes/bars'
+import { createFlowFieldMode } from './modes/flowField'
 import type { ParamSchema, VisualMode, VisualModeFactory } from './types'
 
 const FACTORIES: VisualModeFactory[] = [
+  createFlowFieldMode,
   createBarsMode,
-  // Phase 3: flow field
   // Phase 4: reaction-diffusion, geometric tiling, 3D terrain
   // Phase 4: fireplace, lava lamp
 ]

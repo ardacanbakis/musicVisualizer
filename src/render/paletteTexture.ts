@@ -26,9 +26,11 @@ export class PaletteTexture {
     this.texture.magFilter = THREE.LinearFilter
     this.texture.wrapS = THREE.ClampToEdgeWrapping
     this.texture.wrapT = THREE.ClampToEdgeWrapping
-    // The ramp is authored in sRGB; telling three that means it converts to
-    // linear on sample and the round-trip through outputColorSpace is correct.
-    this.texture.colorSpace = THREE.SRGBColorSpace
+    // Texels are 8-bit sRGB — better precision in the darks than 8-bit linear,
+    // which is where an ambient palette spends most of its range. Tagged
+    // NoColorSpace so three leaves them alone: raw ShaderMaterials get no
+    // automatic decode, so modes call `srgbToLinear` explicitly. See glsl.ts.
+    this.texture.colorSpace = THREE.NoColorSpace
     this.texture.needsUpdate = true
   }
 

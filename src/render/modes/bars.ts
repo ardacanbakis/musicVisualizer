@@ -13,19 +13,16 @@
 import * as THREE from 'three'
 import { BAND_COUNT } from '../../signal/types'
 import type { Signal } from '../../signal/types'
+import { COLOR_HELPERS, FULLSCREEN_VERTEX } from '../glsl'
 import { BandTexture, PaletteTexture } from '../paletteTexture'
 import type { ParamSchema, ParamValues, RenderContext, VisualMode } from '../types'
 
-const VERTEX_SHADER = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position.xy, 0.0, 1.0);
-  }
-`
+const VERTEX_SHADER = FULLSCREEN_VERTEX
 
 const FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
+
+  ${COLOR_HELPERS}
 
   uniform sampler2D uBands;
   uniform sampler2D uPalette;
@@ -68,7 +65,8 @@ const FRAGMENT_SHADER = /* glsl */ `
       smoothstep(halfGap - pixelX, halfGap + pixelX, withinBar) *
       smoothstep(1.0 - halfGap + pixelX, 1.0 - halfGap - pixelX, withinBar);
 
-    vec3 barColor = texture2D(uPalette, vec2(index / max(1.0, n - 1.0), 0.5)).rgb;
+    // Palette texels are sRGB; everything downstream of here is linear light.
+    vec3 barColor = ambSrgbToLinear(texture2D(uPalette, vec2(index / max(1.0, n - 1.0), 0.5)).rgb);
 
     vec3 color = uBackground;
     color = mix(color, barColor, fill * mask);
