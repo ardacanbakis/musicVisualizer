@@ -99,12 +99,40 @@ export class SyntheticSource implements AudioSource {
     const target = Math.min(1, (sum / n) * 1.8)
     this.levelValue += (target - this.levelValue) * Math.min(1, dt * 4)
 
+    this.fillWaveform(out.waveform, t, this.levelValue, pulse)
+
     out.level = this.levelValue
     out.onset = this.onsetValue
     out.beatPhase = phase
     // A synthetic tempo is a known quantity, not an estimate — but reporting it
     // would let a mode display "84 BPM" for a silent room, which is a lie.
     out.bpm = null
+  }
+
+  /**
+   * A plausible oscilloscope trace.
+   *
+   * A pure sine reads as a test signal, not as music, so this is a fundamental
+   * plus two inharmonic partials and a little noise, with the beat pulse
+   * shaping the envelope across the window. The frequencies are chosen so the
+   * trace fills the display with a few cycles — the point is that it *looks*
+   * like audio at a glance, not that it is spectrally accurate.
+   */
+  private fillWaveform(out: Float32Array, t: number, level: number, pulse: number): void {
+    const n = out.length
+    const amplitude = Math.min(1, 0.22 + level * 0.72 + pulse * 0.25)
+    for (let i = 0; i < n; i++) {
+      const x = i / n
+      // Phase advances with real time so the trace drifts rather than sitting
+      // frozen, the way an unsynced scope does.
+      const p = x * Math.PI * 2
+      let v = Math.sin(p * 3 + t * 2.1)
+      v += 0.5 * Math.sin(p * 7 + t * 1.3)
+      v += 0.28 * Math.sin(p * 13.7 - t * 0.7)
+      v += 0.12 * Math.sin(p * 31.3 + t * 3.1)
+      v /= 1.9
+      out[i] = Math.max(-1, Math.min(1, v * amplitude))
+    }
   }
 
   dispose(): void {

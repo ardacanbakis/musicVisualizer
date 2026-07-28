@@ -194,6 +194,24 @@ export class Stage implements RenderContext {
     this.limiter.reset()
   }
 
+  /**
+   * Fade the next mode up from black instead of snapping to it.
+   *
+   * A true crossfade would mean running both modes at once into separate
+   * buffers; this instead leans on the luminance limiter, which already
+   * ramps brightness at a bounded rate. Starting its state at zero makes the
+   * incoming mode rise over roughly a second for free. Not a crossfade, but a
+   * far better transition than a hard cut on a wall display.
+   */
+  fadeIn(): void {
+    this.limiter.fadeFromBlack()
+  }
+
+  /** True between a fadeIn() request and the frame that consumes it. */
+  get isFading(): boolean {
+    return this.limiter.isFading
+  }
+
   /** Clear the scene buffer to a colour. */
   clear(color: THREE.ColorRepresentation, alpha = 1): void {
     this.renderer.setClearColor(color, alpha)

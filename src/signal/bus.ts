@@ -67,6 +67,7 @@ export class SignalBus {
       t: 0,
       dt: 0,
       bands: this.frame.bands,
+      waveform: this.frame.waveform,
       level: 0,
       onset: 0,
       beatPhase: 0,
@@ -174,6 +175,7 @@ export class SignalBus {
     signal.t = t
     signal.dt = dt
     signal.bands = this.frame.bands
+    signal.waveform = this.frame.waveform
     signal.level = this.frame.level
     signal.onset = this.frame.onset
     signal.beatPhase = this.frame.beatPhase

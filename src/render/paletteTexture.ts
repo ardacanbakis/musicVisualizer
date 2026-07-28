@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three'
 import { sampleRamp } from '../signal/types'
+import type { RGB } from '../signal/types'
 import type { Palette } from '../signal/types'
 
 const RESOLUTION = 128
@@ -51,6 +52,70 @@ export class PaletteTexture {
       data[offset + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255)
       data[offset + 3] = 255
     }
+    this.texture.needsUpdate = true
+  }
+
+  dispose(): void {
+    this.texture.dispose()
+  }
+}
+
+/**
+ * A fixed, explicitly-ordered colour ramp as a 1D texture.
+ *
+ * Unlike PaletteTexture this does not sort, interpolate or derive anything —
+ * texel i is colour i. Needed where the order carries meaning that luminance
+ * ordering would destroy, e.g. the Winamp analyser gradient, which runs green
+ * to red bottom-to-top and is not monotonic in brightness.
+ */
+export class RampTexture {
+  readonly texture: THREE.DataTexture
+
+  constructor(colors: RGB[], smooth = false) {
+    const data = new Uint8Array(colors.length * 4)
+    colors.forEach((color, i) => {
+      data[i * 4] = Math.round(Math.max(0, Math.min(1, color[0])) * 255)
+      data[i * 4 + 1] = Math.round(Math.max(0, Math.min(1, color[1])) * 255)
+      data[i * 4 + 2] = Math.round(Math.max(0, Math.min(1, color[2])) * 255)
+      data[i * 4 + 3] = 255
+    })
+    this.texture = new THREE.DataTexture(data, colors.length, 1, THREE.RGBAFormat)
+    // Nearest by default: this ramp is a list of discrete colours, and
+    // interpolating between them defeats the point of choosing them.
+    const filter = smooth ? THREE.LinearFilter : THREE.NearestFilter
+    this.texture.minFilter = filter
+    this.texture.magFilter = filter
+    this.texture.wrapS = THREE.ClampToEdgeWrapping
+    this.texture.wrapT = THREE.ClampToEdgeWrapping
+    this.texture.colorSpace = THREE.NoColorSpace
+    this.texture.needsUpdate = true
+  }
+
+  dispose(): void {
+    this.texture.dispose()
+  }
+}
+
+/**
+ * The time-domain waveform as a 1D float texture, for oscilloscope modes.
+ * Values are -1..1, so this needs a float texture rather than 8-bit.
+ */
+export class WaveformTexture {
+  readonly texture: THREE.DataTexture
+  private data: Float32Array<ArrayBuffer>
+
+  constructor(size: number) {
+    this.data = new Float32Array(size)
+    this.texture = new THREE.DataTexture(this.data, size, 1, THREE.RedFormat, THREE.FloatType)
+    this.texture.minFilter = THREE.LinearFilter
+    this.texture.magFilter = THREE.LinearFilter
+    this.texture.wrapS = THREE.ClampToEdgeWrapping
+    this.texture.wrapT = THREE.ClampToEdgeWrapping
+    this.texture.needsUpdate = true
+  }
+
+  update(waveform: Float32Array): void {
+    this.data.set(waveform)
     this.texture.needsUpdate = true
   }
 

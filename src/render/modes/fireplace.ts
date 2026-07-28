@@ -1,24 +1,40 @@
 /**
  * Fireplace — a digital fire, with the colour under your control.
  *
- * Not a particle system. Fire is simulated here as a heat field on a feedback
- * buffer: each frame every texel samples slightly *below* itself, displaced
- * sideways by a noise field, and loses a little heat. That single rule —
- * advect upward, cool — produces licking flames, because the noise field is
- * what makes the rising column wander rather than climb straight up. Fuel is
- * injected along the bottom edge.
+ * Fire is simulated as a heat field on a feedback buffer: each frame every
+ * texel samples slightly *below* itself, displaced sideways, and loses heat.
+ * Advect upward, cool, inject fuel at the base. No particles.
  *
- * Colour is deliberately decoupled from physics. Real fire colour comes from
- * blackbody radiation, which is beautiful but fixes you to orange; this maps
- * heat through either the palette or a hue you pick, so it can be a green fire
- * or a blue one without the motion changing at all.
+ * Four things separate this from the first version, which rendered as a
+ * burning horizon rather than a fire in a hearth:
  *
- * This is the mode most likely to be left running for hours, so the quiet
- * behaviour is the design target: with no audio at all the fire still burns
- * from its own noise, and audio only makes it flare.
+ * 1. **A hearth envelope.** Fuel is concentrated in the middle and falls away
+ *    at the edges, so the fire has a location. A bed spanning the full width
+ *    reads as the horizon being on fire, which is a different and much less
+ *    cosy thing.
+ *
+ * 2. **Convergence.** Flames are pulled towards the fire's centre line as they
+ *    rise, which is what entrained air does to a real flame. This is what
+ *    produces tapering tongues instead of a rising slab; it is the single
+ *    biggest contributor to it reading as fire.
+ *
+ * 3. **A coal bed.** A separate, near-static glow at the base that does not
+ *    participate in the advection. Real fires are mostly embers, and the
+ *    steady orange underneath is what makes the flickering above look
+ *    anchored rather than free-floating.
+ *
+ * 4. **A vignette.** It should look like a fire in a dark room, so the corners
+ *    fall away. Also keeps the mean frame luminance low, which matters for an
+ *    ambient piece.
+ *
+ * Colour is deliberately decoupled from physics. Real fire colour is blackbody
+ * radiation, beautiful but fixed to orange; this maps heat through either a
+ * chosen hue or the palette, while keeping the dark -> saturated -> white
+ * luminance progression that makes a green or blue fire still read as fire.
  */
 import * as THREE from 'three'
 import type { Signal } from '../../signal/types'
+import { BAND_COUNT } from '../../signal/types'
 import {
   COLOR_HELPERS,
   FULLSCREEN_VERTEX,
@@ -26,7 +42,6 @@ import {
   SIMPLEX_NOISE,
 } from '../glsl'
 import { BandTexture, PaletteTexture } from '../paletteTexture'
-import { BAND_COUNT } from '../../signal/types'
 import type {
   ParamSchema,
   ParamValues,
@@ -51,8 +66,10 @@ const HEAT_FRAGMENT = /* glsl */ `
   uniform float uDt;
   uniform float uRise;
   uniform float uTurbulence;
+  uniform float uConverge;
   uniform float uCooling;
   uniform float uFuel;
+  uniform float uWidth;
   uniform float uLevel;
   uniform float uOnset;
   uniform float uAspect;
@@ -61,62 +78,73 @@ const HEAT_FRAGMENT = /* glsl */ `
   varying vec2 vUv;
 
   void main() {
-    // Sample from below: this texel inherits the heat that was under it, which
-    // is what makes the field rise.
-    float rise = uRise * uDt;
+    float height = vUv.y;
 
-    // Sideways displacement from a noise field that scrolls upward with the
-    // flame. This is the whole trick — without it the column rises straight
-    // and reads as a gradient, not as fire.
+    // --- lateral motion ---
+    // Noise that scrolls upward with the flame, so the wander travels with the
+    // heat instead of the flame sliding through a stationary pattern.
     vec2 noisePos = vec2(vUv.x * uAspect * 3.0, vUv.y * 2.0 - uTime * 0.55);
     float sway = snoise(vec3(noisePos, uTime * 0.35));
     float swayFine = snoise(vec3(noisePos * 2.6, uTime * 0.7));
 
     // Turbulence grows with height: the base of a flame is stable, the tip is
-    // chaotic. A constant amount looks like a flag, not a fire.
-    float height = vUv.y;
-    float turb = uTurbulence * (0.15 + height * 1.5);
+    // chaotic. A constant amount looks like a flag.
+    float turb = uTurbulence * (0.1 + height * 1.8);
+    float lateral = (sway * 0.6 + swayFine * 0.4) * turb;
 
-    vec2 offset = vec2((sway * 0.6 + swayFine * 0.4) * turb * 0.045, -rise);
+    // Convergence towards the centre line, increasing with height. This is
+    // what tapers the flames into tongues.
+    float converge = -(vUv.x - 0.5) * uConverge * height;
+
+    // Both displacements are rates in UV per second, so they must end up the
+    // same order of magnitude as uRise. Getting this wrong is not subtle: a
+    // lateral step several times the vertical one samples from most of a
+    // screen away every frame and smears the flame out of existence.
+    float lateralRate = lateral * 0.15;
+    float convergeRate = converge * 0.5;
+    vec2 offset = vec2((lateralRate + convergeRate) * uDt, -uRise * uDt);
     float heat = texture2D(uHeat, vUv + offset).r;
 
-    // Cooling scales steeply with height. The steepness is what sets flame
-    // height: heat decays as exp(-integral(cooling)/rise), so these constants
-    // put the visible tip around 40-50% of the screen. Too shallow and the
-    // fire is a slab of white filling the frame rather than tongues.
-    heat -= uCooling * uDt * (0.3 + height * 2.2);
+    // Cooling scales steeply with height, which is what sets the flame's
+    // visible tip — heat decays as exp(-integral(cooling)/rise).
+    heat -= uCooling * uDt * (0.3 + height * 2.4);
 
-    // --- fuel along the bottom edge ---
-    // Spectrum across the width: the fire burns hotter where the music is
-    // loud in that part of the spectrum. Reads as the fire "listening"
-    // without any part of it going dark and dead.
+    // --- fuel bed ---
     float band = texture2D(uBands, vec2(vUv.x, 0.5)).r;
 
-    // Two octaves of moving noise, sharpened. The sharpening matters: a bed
-    // that is merely brighter and dimmer produces one continuous sheet of
-    // flame, whereas real fire has cold gaps between separate tongues, and
-    // the gaps are what make it read as fire.
+    // Two octaves, sharpened, so the bed has cold gaps. A bed that is merely
+    // brighter and dimmer burns as one continuous sheet; the gaps are what
+    // separate it into individual tongues.
     float bedA = snoise(vec3(vUv.x * 7.0 * uAspect, uTime * 1.1, 0.0)) * 0.5 + 0.5;
     float bedB = snoise(vec3(vUv.x * 17.0 * uAspect + 5.0, uTime * 1.9, 3.0)) * 0.5 + 0.5;
     float bedNoise = pow(bedA * 0.65 + bedB * 0.35, 1.4);
 
-    // Scaled so even the hottest spot lands near 0.78 rather than clamping at
-    // 1.0. Everything above ~0.8 maps to white in the ramp, so a bed that
-    // saturates renders as a solid white slab with the flame shape lost
-    // inside it — the structure only survives if the fuel stays off the rail.
-    float bed = smoothstep(uSpread, 0.0, vUv.y);
-    float fuel = uFuel * bed * (0.2 + bedNoise * 0.7) * (0.5 + band * 0.3 + uLevel * 0.2);
+    // Hearth envelope: the fire has a middle and edges rather than spanning
+    // the whole frame.
+    float centred = (vUv.x - 0.5) / max(uWidth * 0.5, 0.02);
+    float hearth = exp(-centred * centred * 2.2);
 
-    // Onsets flare the whole bed briefly. Capped, because a fire that doubles
-    // in brightness on every kick is a strobe with extra steps — and the
-    // limiter would claw it back anyway, which looks worse than not doing it.
-    fuel *= 1.0 + uOnset * 0.5;
+    float bed = smoothstep(uSpread, 0.0, vUv.y);
+    // Tuned against *typical* values, not peak ones. bedNoise averages ~0.38
+    // after the sharpening and the band term averages well under 1, so a
+    // scaling that looks right for the maximum leaves the ordinary case at
+    // about a third of the intended heat — which renders as a barely visible
+    // smudge. Peak still lands just under 1.0 and only when everything
+    // coincides.
+    float fuel = uFuel * bed * hearth * (0.4 + bedNoise * 0.6)
+               * (0.7 + band * 0.25 + uLevel * 0.15);
+
+    // Onsets flare the bed. Capped: a fire that doubles in brightness on every
+    // kick is a strobe with extra steps, and the limiter would claw it back
+    // anyway, which looks worse than never doing it.
+    fuel *= 1.0 + uOnset * 0.45;
 
     heat = max(heat, fuel);
 
-    // Embers: rare bright specks near the base that survive a little longer.
+    // Embers: rare specks lifted from the bed that survive longer than the
+    // flame around them.
     float ember = hash22(floor(vUv / uTexel * 0.5) + floor(uTime * 8.0)).x;
-    if (ember > 0.9995 && vUv.y < 0.25) heat = max(heat, 0.85);
+    if (ember > 0.9994 && vUv.y < 0.3 && hearth > 0.35) heat = max(heat, 0.7);
 
     gl_FragColor = vec4(clamp(heat, 0.0, 1.0), 0.0, 0.0, 1.0);
   }
@@ -126,6 +154,7 @@ const RENDER_FRAGMENT = /* glsl */ `
   precision highp float;
 
   ${COLOR_HELPERS}
+  ${SIMPLEX_NOISE}
 
   uniform sampler2D uHeat;
   uniform sampler2D uPalette;
@@ -134,21 +163,24 @@ const RENDER_FRAGMENT = /* glsl */ `
   uniform float uUseTint;
   uniform float uGlow;
   uniform float uContrast;
+  uniform float uCoals;
+  uniform float uWidth;
+  uniform float uSpread;
+  uniform float uAspect;
+  uniform float uTime;
+  uniform float uVignette;
 
   varying vec2 vUv;
 
-  // Blackbody-ish ramp, used as the shape of the tinted gradient rather than
-  // for its literal colour: dark red -> orange -> yellow -> white. Keeping
-  // that luminance progression is what makes a green or blue fire still read
-  // as fire rather than as a green smear.
+  // Blackbody-shaped ramp, used for its luminance progression rather than its
+  // literal colour: dark -> saturated -> desaturated -> white.
   vec3 heatRamp(float t, vec3 tint) {
     float lo = smoothstep(0.0, 0.45, t);
     float mid = smoothstep(0.3, 0.75, t);
-    float hi = smoothstep(0.78, 1.0, t);
+    float hi = smoothstep(0.8, 1.0, t);
     vec3 color = tint * lo;
-    // Desaturate towards the hot end: the hottest part of any flame is white.
-    color = mix(color, mix(tint, vec3(1.0), 0.55), mid);
-    color = mix(color, vec3(1.0), hi * 0.55);
+    color = mix(color, mix(tint, vec3(1.0), 0.5), mid);
+    color = mix(color, vec3(1.0), hi * 0.5);
     return color;
   }
 
@@ -156,20 +188,37 @@ const RENDER_FRAGMENT = /* glsl */ `
     float heat = texture2D(uHeat, vUv).r;
     float t = pow(clamp(heat, 0.0, 1.0), uContrast);
 
-    vec3 flame;
+    vec3 flameColor;
     if (uUseTint > 0.5) {
-      flame = heatRamp(t, uTint);
+      flameColor = heatRamp(t, uTint);
     } else {
-      // Palette mode: the album or built-in palette supplies the colour,
-      // sampled along its luminance ramp so hot still means bright.
-      flame = ambSrgbToLinear(texture2D(uPalette, vec2(t, 0.5)).rgb);
+      flameColor = ambSrgbToLinear(texture2D(uPalette, vec2(t, 0.5)).rgb);
     }
 
-    // Emissive falloff so the fire lights the darkness around it a little.
-    float bloom = smoothstep(0.015, 0.4, heat);
-    vec3 color = uBackground + flame * bloom * (1.0 + uGlow * t * t);
+    float bloom = smoothstep(0.01, 0.3, heat);
+    vec3 color = flameColor * bloom * (1.0 + uGlow * t * t);
 
-    gl_FragColor = vec4(color, 1.0);
+    // --- coal bed ---
+    // A slow, nearly static glow beneath the flames. Deliberately not part of
+    // the advection: embers are what a fire mostly is, and a steady base is
+    // what stops the flickering above from looking like it is floating.
+    float centred = (vUv.x - 0.5) / max(uWidth * 0.5, 0.02);
+    float hearth = exp(-centred * centred * 2.0);
+    float coalBand = smoothstep(uSpread * 1.35, 0.0, vUv.y);
+    float coalNoise = snoise(vec3(vUv.x * 9.0 * uAspect, vUv.y * 22.0, uTime * 0.5)) * 0.5 + 0.5;
+    float coal = coalBand * hearth * uCoals * (0.35 + coalNoise * 0.85);
+    vec3 coalColor = uUseTint > 0.5 ? heatRamp(0.45 + coalNoise * 0.2, uTint)
+                                    : ambSrgbToLinear(texture2D(uPalette, vec2(0.5, 0.5)).rgb);
+    color += coalColor * coal * 0.8;
+
+    // --- vignette ---
+    // A fire in a dark room, not a fire filling a rectangle. Also holds the
+    // mean frame luminance down, which an ambient piece wants.
+    vec2 v = (vUv - 0.5) * vec2(uAspect, 1.0);
+    float vignette = 1.0 - uVignette * smoothstep(0.25, 0.95, length(v));
+    color *= max(vignette, 0.0);
+
+    gl_FragColor = vec4(uBackground + color, 1.0);
   }
 `
 
@@ -190,12 +239,30 @@ export const fireplaceParams = {
     hint: 'Only used when flame colour is set to Custom.',
     default: '#ff6a1a',
   },
+  width: {
+    type: 'float',
+    label: 'Fire width',
+    hint: 'How much of the screen the hearth spans.',
+    default: 0.55,
+    min: 0.15,
+    max: 1.6,
+    step: 0.01,
+  },
   height: {
     type: 'float',
     label: 'Flame height',
     default: 1,
     min: 0.3,
     max: 2.5,
+    step: 0.01,
+  },
+  converge: {
+    type: 'float',
+    label: 'Taper',
+    hint: 'How strongly flames pull towards the centre as they rise.',
+    default: 0.5,
+    min: 0,
+    max: 2,
     step: 0.01,
   },
   turbulence: {
@@ -215,11 +282,18 @@ export const fireplaceParams = {
     max: 1,
     step: 0.01,
   },
+  coals: {
+    type: 'float',
+    label: 'Coal bed',
+    default: 0.8,
+    min: 0,
+    max: 2,
+    step: 0.01,
+  },
   spread: {
     type: 'float',
     label: 'Bed depth',
-    hint: 'How far up the screen the fuel bed reaches.',
-    default: 0.12,
+    default: 0.1,
     min: 0.02,
     max: 0.5,
     step: 0.005,
@@ -240,13 +314,21 @@ export const fireplaceParams = {
     max: 2,
     step: 0.01,
   },
+  vignette: {
+    type: 'float',
+    label: 'Vignette',
+    default: 0.55,
+    min: 0,
+    max: 1,
+    step: 0.01,
+  },
 } satisfies ParamSchema
 
 class FireplaceMode implements VisualMode {
   readonly id = 'fireplace'
   readonly name = 'Fireplace'
   readonly description =
-    'A digital fire on a heat feedback buffer. Burns on its own in silence; the spectrum feeds the fuel bed.'
+    'A digital fire in a hearth, with a coal bed and any flame colour you like. Burns on its own in silence.'
   readonly params: ParamSchema = fireplaceParams
 
   private ctx: RenderContext | null = null
@@ -273,12 +355,14 @@ class FireplaceMode implements VisualMode {
         uDt: { value: 1 / 60 },
         uRise: { value: 0.35 },
         uTurbulence: { value: 1 },
-        uCooling: { value: 0.9 },
+        uConverge: { value: 0.5 },
+        uCooling: { value: 0.75 },
         uFuel: { value: 0.9 },
+        uWidth: { value: 0.55 },
         uLevel: { value: 0 },
         uOnset: { value: 0 },
         uAspect: { value: 1 },
-        uSpread: { value: 0.12 },
+        uSpread: { value: 0.1 },
       },
     })
 
@@ -295,6 +379,12 @@ class FireplaceMode implements VisualMode {
         uUseTint: { value: 1 },
         uGlow: { value: 0.7 },
         uContrast: { value: 1.1 },
+        uCoals: { value: 0.8 },
+        uWidth: { value: 0.55 },
+        uSpread: { value: 0.1 },
+        uAspect: { value: 1 },
+        uTime: { value: 0 },
+        uVignette: { value: 0.55 },
       },
     })
 
@@ -314,10 +404,7 @@ class FireplaceMode implements VisualMode {
       filter: THREE.LinearFilter,
     })
     this.heat.clear(0, 0, 0, 1)
-    ;(this.heatMaterial!.uniforms.uTexel.value as THREE.Vector2).set(
-      1 / width,
-      1 / height,
-    )
+    ;(this.heatMaterial!.uniforms.uTexel.value as THREE.Vector2).set(1 / width, 1 / height)
   }
 
   frame(signal: Signal, params: ParamValues): void {
@@ -331,42 +418,53 @@ class FireplaceMode implements VisualMode {
     this.palette.update(signal.palette)
 
     const calm = ctx.reducedMotion
+    const aspect = ctx.width / Math.max(1, ctx.height)
+    const flameHeight = params.height as number
 
     const u = heatMaterial.uniforms
     u.uHeat.value = heat.read.texture
     u.uTime.value = signal.t
     u.uDt.value = signal.dt
-    // Rise and cooling are a pair: raising one without the other changes the
-    // flame's height rather than its speed.
-    u.uRise.value = 0.35 * (params.height as number) * (calm ? 0.6 : 1)
-    u.uCooling.value = 0.9 / Math.max(0.3, params.height as number)
+    // Rise and cooling are a pair: changing one alone changes the flame's
+    // height rather than its speed.
+    u.uRise.value = 0.35 * flameHeight * (calm ? 0.6 : 1)
+    u.uCooling.value = 0.75 / Math.max(0.3, flameHeight)
     u.uTurbulence.value = (params.turbulence as number) * (calm ? 0.4 : 1)
+    u.uConverge.value = params.converge as number
     u.uFuel.value = params.fuel as number
+    u.uWidth.value = params.width as number
     u.uSpread.value = params.spread as number
     u.uLevel.value = signal.level
     u.uOnset.value = calm ? signal.onset * 0.3 : signal.onset
-    u.uAspect.value = ctx.width / Math.max(1, ctx.height)
+    u.uAspect.value = aspect
     ctx.blit(heatMaterial, heat.write)
     heat.swap()
 
     const background = signal.palette.background
-    render.uniforms.uHeat.value = heat.read.texture
-    ;(render.uniforms.uBackground.value as THREE.Color).setRGB(
+    const r = render.uniforms
+    r.uHeat.value = heat.read.texture
+    ;(r.uBackground.value as THREE.Color).setRGB(
       background[0],
       background[1],
       background[2],
       THREE.SRGBColorSpace,
     )
     const useTint = (params.colorSource as string) === 'custom'
-    render.uniforms.uUseTint.value = useTint ? 1 : 0
+    r.uUseTint.value = useTint ? 1 : 0
     if (useTint) {
-      // The colour picker hands us an sRGB hex string; setStyle with an
-      // explicit colour space converts it into the linear working space.
+      // The colour picker gives an sRGB hex string; setStyle with an explicit
+      // colour space converts it into the linear working space.
       this.tintColor.setStyle(params.tint as string, THREE.SRGBColorSpace)
-      ;(render.uniforms.uTint.value as THREE.Color).copy(this.tintColor)
+      ;(r.uTint.value as THREE.Color).copy(this.tintColor)
     }
-    render.uniforms.uGlow.value = params.glow as number
-    render.uniforms.uContrast.value = params.contrast as number
+    r.uGlow.value = params.glow as number
+    r.uContrast.value = params.contrast as number
+    r.uCoals.value = params.coals as number
+    r.uWidth.value = params.width as number
+    r.uSpread.value = params.spread as number
+    r.uVignette.value = params.vignette as number
+    r.uAspect.value = aspect
+    r.uTime.value = signal.t
     ctx.blit(render, null)
   }
 

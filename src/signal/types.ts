@@ -71,6 +71,19 @@ export interface Signal {
    * Length is stable for the lifetime of the app (see BAND_COUNT).
    */
   bands: Float32Array
+  /**
+   * Time-domain samples, WAVEFORM_SIZE of them, each -1..1, most recent frame.
+   *
+   * Added after the original contract for oscilloscope-style modes, which
+   * cannot be built from `bands` — a spectrum has thrown the phase away, and
+   * the shape of the wave is the entire point of a scope. The extension is
+   * additive and the bus always populates it (the synthetic source generates a
+   * plausible trace), so the two properties that actually matter are intact:
+   * every field is always present, and no renderer can tell which sources exist.
+   *
+   * Already gated, so silence is a flat line rather than amplified noise.
+   */
+  waveform: Float32Array
   /** Overall normalised loudness, 0..1. Decays cleanly to 0 in silence. */
   level: number
   /** Spikes to 1 on a detected onset, then decays. 0..1. */
@@ -90,6 +103,13 @@ export interface Signal {
 
 /** Number of log-spaced bands in `Signal.bands`. Fixed for the app's lifetime. */
 export const BAND_COUNT = 32
+
+/**
+ * Samples in `Signal.waveform`. 576 is what Winamp's oscilloscope used, and
+ * matching it makes the classic visualiser look right rather than approximately
+ * right.
+ */
+export const WAVEFORM_SIZE = 576
 
 /**
  * Sample a palette ramp at x in 0..1, linearly interpolating between stops.

@@ -20,6 +20,8 @@ import { DebugScope } from './ui/debugOverlay'
 import { ParamPanel } from './ui/ParamPanel'
 import { modeEntry } from './render/registry'
 import { useFullscreen } from './ui/useFullscreen'
+import { PalettePicker } from './ui/PalettePicker'
+import { Footer } from './ui/Footer'
 import { CloseIcon, ExitFullscreenIcon, FullscreenIcon, GearIcon } from './ui/icons'
 
 type MicState = 'off' | 'requesting' | 'on' | 'denied' | 'unsupported'
@@ -46,6 +48,12 @@ export function App() {
   const resetParams = useSettings((s) => s.resetParams)
   const panelVisible = useSettings((s) => s.panelVisible)
   const togglePanel = useSettings((s) => s.togglePanel)
+  const rotateModes = useSettings((s) => s.rotateModes)
+  const rotatePalettes = useSettings((s) => s.rotatePalettes)
+  const rotateSeconds = useSettings((s) => s.rotateSeconds)
+  const setRotateModes = useSettings((s) => s.setRotateModes)
+  const setRotatePalettes = useSettings((s) => s.setRotatePalettes)
+  const setRotateSeconds = useSettings((s) => s.setRotateSeconds)
   const fullscreen = useFullscreen()
 
   const entry = modeEntry(modeId)
@@ -139,8 +147,9 @@ export function App() {
     modeRef.current = mode
     // The incoming mode's luminance has nothing to do with the outgoing one's,
     // so carrying the clamp state across would dim the first second of every
-    // switch for no reason.
-    stage.resetLimiter()
+    // switch for no reason. Auto-rotate calls fadeIn() just before changing the
+    // mode and that must win, so this only primes when no fade is pending.
+    if (!stage.isFading) stage.resetLimiter()
     return () => {
       // Disposing here as well as above is intentional: a mode swap must free
       // its GPU resources at the moment of the swap, not whenever the next one
@@ -159,6 +168,38 @@ export function App() {
   useEffect(() => {
     busRef.current?.setPalette(paletteById(paletteId))
   }, [paletteId])
+
+  // --- auto-rotate ---------------------------------------------------------
+  useEffect(() => {
+    if (!rotateModes && !rotatePalettes) return
+
+    const timer = window.setInterval(() => {
+      const state = useSettings.getState()
+
+      if (state.rotatePalettes) {
+        const options = BUILT_IN_PALETTES.filter((p) => p.id !== state.paletteId)
+        if (options.length > 0) {
+          // The bus already crossfades palettes over ~2s, so this needs no
+          // transition handling of its own.
+          state.setPalette(options[Math.floor(Math.random() * options.length)].id)
+        }
+      }
+
+      if (state.rotateModes) {
+        const options = MODES.filter((m) => m.id !== state.modeId)
+        if (options.length > 0) {
+          // Fade the incoming mode up from black. Not a true crossfade — that
+          // needs both modes live at once — but far better than a hard cut,
+          // and it costs nothing because the luminance limiter already ramps
+          // brightness at a bounded rate.
+          stageRef.current?.fadeIn()
+          state.setMode(options[Math.floor(Math.random() * options.length)].id)
+        }
+      }
+    }, Math.max(15, rotateSeconds) * 1000)
+
+    return () => window.clearInterval(timer)
+  }, [rotateModes, rotatePalettes, rotateSeconds])
 
   useEffect(() => {
     debugVisibleRef.current = debugVisible
@@ -319,20 +360,46 @@ export function App() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-white/45">Palette</span>
-            <select
-              value={paletteId}
-              onChange={(e) => setPalette(e.target.value)}
-              className="rounded border border-white/15 bg-black/60 px-2 py-1"
-            >
-              {BUILT_IN_PALETTES.map((palette) => (
-                <option key={palette.id} value={palette.id}>
-                  {palette.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <PalettePicker value={paletteId} onChange={setPalette} />
+
+          <div className="flex flex-col gap-2 rounded border border-white/10 p-2">
+            <span className="text-xs uppercase tracking-wide text-white/45">Auto-rotate</span>
+            <label className="flex cursor-pointer items-center justify-between gap-2">
+              <span className="text-xs text-white/70">Shuffle modes</span>
+              <input
+                type="checkbox"
+                checked={rotateModes}
+                onChange={(e) => setRotateModes(e.target.checked)}
+                className="h-3.5 w-3.5 accent-white/80"
+              />
+            </label>
+            <label className="flex cursor-pointer items-center justify-between gap-2">
+              <span className="text-xs text-white/70">Shuffle palettes</span>
+              <input
+                type="checkbox"
+                checked={rotatePalettes}
+                onChange={(e) => setRotatePalettes(e.target.checked)}
+                className="h-3.5 w-3.5 accent-white/80"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="flex items-baseline justify-between gap-2 text-xs text-white/70">
+                Every
+                <span className="font-mono text-[10px] tabular-nums text-white/40">
+                  {formatInterval(rotateSeconds)}
+                </span>
+              </span>
+              <input
+                type="range"
+                min={15}
+                max={1800}
+                step={15}
+                value={rotateSeconds}
+                onChange={(e) => setRotateSeconds(Number(e.target.value))}
+                className="h-1 w-full cursor-pointer appearance-none rounded bg-white/15 accent-white/80"
+              />
+            </label>
+          </div>
 
           <div className="my-1 h-px bg-white/10" />
 
@@ -352,6 +419,14 @@ export function App() {
         )}
       </div>
 
+      {/* Hidden in fullscreen, and also when the panel is closed — both are
+          the user asking for a bare screen. */}
+      {!fullscreen.isFullscreen && panelVisible && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <Footer />
+        </div>
+      )}
+
       <canvas
         ref={debugCanvasRef}
         className={`absolute right-4 top-4 h-[340px] w-[420px] rounded-lg border border-white/10 ${
@@ -360,4 +435,11 @@ export function App() {
       />
     </div>
   )
+}
+
+/** "3m" reads better than "180s" for a rotation interval. */
+function formatInterval(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const minutes = seconds / 60
+  return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`
 }

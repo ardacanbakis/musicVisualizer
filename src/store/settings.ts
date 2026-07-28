@@ -21,12 +21,22 @@ interface SettingsState {
    *  come back up bare after a power cut, not with the controls open. */
   panelVisible: boolean
 
+  /** Auto-rotate. Mode and palette are separate because wanting one colour
+   *  scheme with changing visuals (or the reverse) are both reasonable. */
+  rotateModes: boolean
+  rotatePalettes: boolean
+  /** Seconds between rotations. */
+  rotateSeconds: number
+
   setMode: (id: string) => void
   setPalette: (id: string) => void
   setParam: (modeId: string, key: string, value: ParamValue) => void
   resetParams: (modeId: string) => void
   toggleDebug: () => void
   togglePanel: () => void
+  setRotateModes: (on: boolean) => void
+  setRotatePalettes: (on: boolean) => void
+  setRotateSeconds: (seconds: number) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -37,6 +47,9 @@ export const useSettings = create<SettingsState>()(
       params: {},
       debugVisible: false,
       panelVisible: true,
+      rotateModes: false,
+      rotatePalettes: false,
+      rotateSeconds: 180,
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -55,6 +68,10 @@ export const useSettings = create<SettingsState>()(
         }),
       toggleDebug: () => set((state) => ({ debugVisible: !state.debugVisible })),
       togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
+      setRotateModes: (on) => set({ rotateModes: on }),
+      setRotatePalettes: (on) => set({ rotatePalettes: on }),
+      setRotateSeconds: (seconds) =>
+        set({ rotateSeconds: Math.max(15, Math.round(seconds)) }),
     }),
     {
       name: 'ambient-visualizer-settings',

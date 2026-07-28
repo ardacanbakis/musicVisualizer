@@ -55,6 +55,7 @@ export class MicrophoneSource implements AudioSource {
   private spectrum: Float32Array<ArrayBuffer>
   private previousSpectrum: Float32Array<ArrayBuffer>
   private rawBands: Float32Array<ArrayBuffer>
+  private timeDomain: Float32Array<ArrayBuffer>
   private edges: Int32Array
 
   private envelope: EnvelopeFollower
@@ -81,6 +82,7 @@ export class MicrophoneSource implements AudioSource {
     this.spectrum = new Float32Array(bins)
     this.previousSpectrum = new Float32Array(bins)
     this.rawBands = new Float32Array(bandCount)
+    this.timeDomain = new Float32Array(analyser.fftSize)
     this.edges = computeBandEdges(bandCount, FFT_SIZE, context.sampleRate)
     this.envelope = new EnvelopeFollower(bandCount)
     this.normaliser = new RollingNormaliser(bandCount)
@@ -146,6 +148,18 @@ export class MicrophoneSource implements AudioSource {
     const smoothed = this.envelope.process(this.rawBands, dt)
     const normalised = this.normaliser.process(smoothed, dt)
     out.bands.set(normalised)
+
+    // --- waveform ---
+    // Decimated rather than averaged: averaging is a low-pass filter and it
+    // visibly rounds off the trace, which is the one thing an oscilloscope is
+    // supposed to show honestly.
+    this.analyser.getFloatTimeDomainData(this.timeDomain)
+    const stride = this.timeDomain.length / out.waveform.length
+    for (let i = 0; i < out.waveform.length; i++) {
+      const sample = this.timeDomain[Math.min(this.timeDomain.length - 1, Math.floor(i * stride))]
+      // Gated, so a silent room is a flat line instead of amplified hiss.
+      out.waveform[i] = Math.max(-1, Math.min(1, sample * gateGain))
+    }
 
     // --- level ---
     const gatedLevel = rawLevel * gateGain

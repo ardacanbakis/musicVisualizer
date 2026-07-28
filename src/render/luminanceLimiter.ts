@@ -55,6 +55,7 @@ export class LuminanceLimiter {
   private presentMaterial: THREE.ShaderMaterial
   private readbackBuffer = new Float32Array(4)
   private primed = false
+  private zeroState = false
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -251,6 +252,17 @@ export class LuminanceLimiter {
       this.stateFlipped = !this.stateFlipped
     }
 
+    // A requested fade-up: clear the state to zero once, then let the normal
+    // rate limit carry it back up.
+    if (this.zeroState) {
+      this.zeroState = false
+      const previousTarget = this.renderer.getRenderTarget()
+      this.renderer.setClearColor(0x000000, 1)
+      this.renderer.setRenderTarget(this.stateRead)
+      this.renderer.clear(true, false, false)
+      this.renderer.setRenderTarget(previousTarget)
+    }
+
     // --- advance the allowed luminance ---
     this.stateUpdate.uniforms.uCurrent.value = measured.texture
     this.stateUpdate.uniforms.uPrevious.value = this.stateRead.texture
@@ -291,6 +303,19 @@ export class LuminanceLimiter {
   /** Forget the accumulated state, e.g. on a mode switch. */
   reset(): void {
     this.primed = false
+  }
+
+  /**
+   * Skip priming, so the allowed luminance starts at zero and the next frames
+   * ramp up at maxRise. Used for auto-rotate transitions.
+   */
+  fadeFromBlack(): void {
+    this.primed = true
+    this.zeroState = true
+  }
+
+  get isFading(): boolean {
+    return this.zeroState
   }
 
   dispose(): void {

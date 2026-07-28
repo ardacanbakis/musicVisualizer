@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { SignalBus } from './bus'
 import { BUILT_IN_PALETTES } from './palettes'
-import { BAND_COUNT } from './types'
+import { BAND_COUNT, WAVEFORM_SIZE } from './types'
 import type { AudioFrame, AudioSource } from './sources/types'
 import type { Signal } from './types'
 
@@ -26,6 +26,19 @@ function assertContract(signal: Signal): void {
     expect(band).toBeGreaterThanOrEqual(0)
     expect(band).toBeLessThanOrEqual(1)
   }
+  // The waveform is part of the contract too: always present, always the
+  // declared length, always in range — including with no microphone.
+  // Reduced to two assertions rather than one per sample: this runs 600 times
+  // in one test, and 576 expect() calls a frame dominated the whole suite.
+  expect(signal.waveform.length).toBe(WAVEFORM_SIZE)
+  let waveMin = Infinity
+  let waveMax = -Infinity
+  for (const sample of signal.waveform) {
+    if (sample < waveMin) waveMin = sample
+    if (sample > waveMax) waveMax = sample
+  }
+  expect(waveMin).toBeGreaterThanOrEqual(-1)
+  expect(waveMax).toBeLessThanOrEqual(1)
   expect(signal.level).toBeGreaterThanOrEqual(0)
   expect(signal.level).toBeLessThanOrEqual(1)
   expect(signal.onset).toBeGreaterThanOrEqual(0)
@@ -66,6 +79,28 @@ describe('SignalBus with no sources at all', () => {
     const min = Math.min(...samples)
     const max = Math.max(...samples)
     expect(max - min).toBeGreaterThan(0.1)
+    bus.dispose()
+  })
+
+  it('produces a moving waveform with no microphone', () => {
+    // A flat line would satisfy the contract and still be a dead oscilloscope.
+    const bus = new SignalBus()
+    let seenNegative = false
+    let seenPositive = false
+    let changed = false
+    let previous = 0
+    for (let i = 0; i < 300; i++) {
+      const signal = bus.update(i * FRAME_MS)
+      for (const sample of signal.waveform) {
+        if (sample < -0.05) seenNegative = true
+        if (sample > 0.05) seenPositive = true
+      }
+      if (i > 0 && signal.waveform[10] !== previous) changed = true
+      previous = signal.waveform[10]
+    }
+    expect(seenNegative).toBe(true)
+    expect(seenPositive).toBe(true)
+    expect(changed).toBe(true)
     bus.dispose()
   })
 
@@ -172,6 +207,7 @@ describe('SignalBus source swapping', () => {
     disposed = false
     poll(_dt: number, _t: number, out: AudioFrame): void {
       out.bands.fill(0.5)
+      out.waveform.fill(0.25)
       out.level = 0.5
       out.onset = 0
       out.beatPhase = 0.25

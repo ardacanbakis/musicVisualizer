@@ -25,6 +25,7 @@ type Signal = {
   t: number              // seconds since app start
   dt: number             // seconds since last frame (clamped, never 0 or huge)
   bands: Float32Array    // BAND_COUNT log-spaced energy bands, each 0..1, smoothed
+  waveform: Float32Array // WAVEFORM_SIZE time-domain samples, -1..1, gated
   level: number          // overall normalised loudness, 0..1
   onset: number          // 0..1, spikes to 1 on a detected onset, then decays
   beatPhase: number      // 0..1 sawtooth synced to estimated tempo
@@ -48,6 +49,12 @@ plausible substitute so the contract is always satisfied.
 
 If you find yourself writing `if (micConnected)` in a mode, the bus has a bug.
 Fix the bus.
+
+`waveform` was added after the original contract, for oscilloscope modes: a
+spectrum has discarded the phase, so a scope cannot be built from `bands`. The
+extension is additive, existing modes ignore it, and the bus always populates
+it (the synthetic source generates a plausible trace) — so both properties that
+matter still hold. That is the bar any future addition has to clear.
 
 `bpm` is the one field allowed to be null while audio is playing, and that is
 deliberate: a visual pulsing at the wrong tempo looks far worse than one that is
@@ -116,11 +123,13 @@ src/
     glsl.ts         shared shader snippets + the COLOUR SPACE CONVENTION
     registry.ts     one array; add a mode here
     params.ts       schema defaults merged with saved overrides
-    paletteTexture.ts  palette + band data as textures, shared by all modes
+    paletteTexture.ts  palette, ramp, band and waveform textures; shared
     modes/          one file per mode
   ui/
     debugOverlay.ts the debug scope (press D)
     ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
+    PalettePicker.tsx  swatch grid; palettes are picked by sight, not by name
+    Footer.tsx      social links; hidden in fullscreen and when the panel is
   store/
     settings.ts     zustand + localStorage
 ```
@@ -219,7 +228,8 @@ the shader wrong?", and this answers it in about two seconds.
    from here is built against them rather than retrofitted)
 4. ✅ Reaction-diffusion, geometric tiling, 3D terrain, fireplace, lava lamp
 5. Spotify auth, polling, palette extraction, crossfade
-6. Ambient shell — auto-hide, wake lock, auto-rotate
-   (a manual fullscreen button and a settings show/hide toggle landed early,
-   in phase 4; the auto-hide-on-idle behaviour is still phase 6)
+6. Ambient shell — auto-hide on idle, wake lock
+   (fullscreen, the settings show/hide toggle and auto-rotate landed early;
+   auto-rotate fades the incoming mode up from black rather than a true
+   two-mode crossfade, which would need both modes live at once)
 7. Frame capture and high-resolution still export
