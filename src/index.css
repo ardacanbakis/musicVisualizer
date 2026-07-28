@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    background: #000;
+    color: #fff;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  /* This thing lives on a wall. Nothing here should ever be selectable or
+     show a text cursor when someone brushes the mouse. */
+  body {
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
