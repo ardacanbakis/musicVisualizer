@@ -9,7 +9,6 @@
  * GPU work belongs in `init()`.
  */
 import { createBarsMode } from './modes/bars'
-import { createFireplaceMode } from './modes/fireplace'
 import { createWinampMode } from './modes/winamp'
 import { createFlowFieldMode } from './modes/flowField'
 import { createLavaLampMode } from './modes/lavaLamp'
@@ -21,7 +20,6 @@ import type { ParamSchema, VisualMode, VisualModeFactory } from './types'
 // Adding a mode is one import above and one entry here. Nothing else.
 const FACTORIES: VisualModeFactory[] = [
   createFlowFieldMode,
-  createFireplaceMode,
   createLavaLampMode,
   createReactionDiffusionMode,
   createTilingMode,
@@ -60,6 +58,14 @@ export const DEFAULT_MODE_ID = MODES[0].id
 
 export function modeEntry(id: string): ModeEntry {
   return byId.get(id) ?? MODES[0]
+}
+
+/** The id `delta` places along from `id`, wrapping. Used by the shortcuts. */
+export function cycleModeId(id: string, delta: number): string {
+  const index = MODES.findIndex((m) => m.id === id)
+  const from = index === -1 ? 0 : index
+  const next = (from + delta + MODES.length * 2) % MODES.length
+  return MODES[next].id
 }
 
 /** Create a fresh, uninitialised instance of a mode. Caller must call init(). */

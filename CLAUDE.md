@@ -125,7 +125,15 @@ src/
     params.ts       schema defaults merged with saved overrides
     paletteTexture.ts  palette, ramp, band and waveform textures; shared
     modes/          one file per mode
+  spotify/          optional; the app is complete without any of it
+    auth.ts         OAuth PKCE — no client secret, deployable as a static site
+    client.ts       polling, token refresh, pushes palette/track into the bus
+    playhead.ts     local interpolation between 4 s polls, pure and tested
+    albumPalette.ts album art -> downsample -> worker -> buildPalette
+    kmeans.ts       pure, seeded, deterministic; kmeans.worker.ts wraps it
   ui/
+    ControlPanel.tsx  the dockable panel; sections, mode list, shortcuts
+    SpotifyPanel.tsx  connect/setup; errors appear HERE and nowhere else
     debugOverlay.ts the debug scope (press D)
     ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
     PalettePicker.tsx  swatch grid; palettes are picked by sight, not by name
@@ -170,6 +178,28 @@ them, because the level they compare against is a mean across all bands.
 **Do not call `/v1/audio-features` or `/v1/audio-analysis`.** They return 403 for
 any app created after November 2024. All rhythmic information comes from the
 microphone.
+
+## Spotify notes
+
+Entirely optional — the app is fully usable and attractive without it, and
+that is the test any change here has to pass.
+
+- **The client id is a runtime setting**, entered in the panel and kept in
+  localStorage. It is not a secret (it is in the authorize URL of every
+  Spotify web app) but it is per-deployment, so baking it in would stop
+  anyone running their own copy. The redirect URI must be registered in the
+  Spotify dashboard exactly as the panel displays it, trailing slash included
+  — dev and production are different URIs and both need registering.
+- **Every failure degrades silently.** Declined consent, expired refresh
+  token, revoked app, offline, a 429, album art the CDN serves without CORS
+  headers so the canvas taints and `getImageData` throws — all of it lands in
+  the settings panel and never on the canvas. This thing lives on a wall.
+- **Palette extraction is deterministic**, seeded from the track id, so a
+  track you have heard before comes back the same colour. k-means runs in a
+  worker because it lands exactly when a crossfade starts.
+- **The playhead is interpolated locally** and only resynced past 250 ms of
+  drift. Snapping to every poll re-introduces the jitter interpolation exists
+  to remove, since each response is already stale by its network latency.
 
 ## Rendering conventions
 
@@ -226,8 +256,10 @@ the shader wrong?", and this answers it in about two seconds.
 3. ✅ Mode registry, auto-generated param UI, flow field
    (luminance clamp and reduced-motion pulled forward from 6, so every mode
    from here is built against them rather than retrofitted)
-4. ✅ Reaction-diffusion, geometric tiling, 3D terrain, fireplace, lava lamp
-5. Spotify auth, polling, palette extraction, crossfade
+4. ✅ Reaction-diffusion, geometric tiling, 3D terrain, lava lamp, Winamp
+   (a fireplace mode was built and then removed at the user's request; it is
+   in git history if it is ever wanted back)
+5. ✅ Spotify auth, polling, palette extraction, crossfade
 6. Ambient shell — auto-hide on idle, wake lock
    (fullscreen, the settings show/hide toggle and auto-rotate landed early;
    auto-rotate fades the incoming mode up from black rather than a true

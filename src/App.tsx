@@ -5,24 +5,26 @@
  * state on purpose: a 60 Hz render must not depend on React having re-rendered,
  * and every mode swap and param change is pushed into a ref by an effect.
  *
- * The ambient shell proper — fullscreen, auto-hide, wake lock, auto-rotate — is
- * phase 6. What is here is the minimum needed to drive and inspect the signal.
+ * Everything visual lives in ui/. Everything audio lives behind the bus. This
+ * file is the wiring between them and nothing else.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { SignalBus } from './signal/bus'
 import { MicrophoneSource } from './signal/sources/microphone'
-import { BUILT_IN_PALETTES, paletteById } from './signal/palettes'
+import { BUILT_IN_PALETTES, cyclePaletteId, paletteById } from './signal/palettes'
 import { Stage } from './render/stage'
-import { MODES, createMode } from './render/registry'
+import { MODES, createMode, cycleModeId, modeEntry } from './render/registry'
 import type { VisualMode } from './render/types'
 import { resolveParams, useSettings } from './store/settings'
 import { DebugScope } from './ui/debugOverlay'
-import { ParamPanel } from './ui/ParamPanel'
-import { modeEntry } from './render/registry'
-import { useFullscreen } from './ui/useFullscreen'
-import { PalettePicker } from './ui/PalettePicker'
+import { ControlPanel } from './ui/ControlPanel'
 import { Footer } from './ui/Footer'
-import { CloseIcon, ExitFullscreenIcon, FullscreenIcon, GearIcon } from './ui/icons'
+import { GearIcon } from './ui/icons'
+import { useFullscreen } from './ui/useFullscreen'
+import { SpotifyPanel } from './ui/SpotifyPanel'
+import { SpotifyClient } from './spotify/client'
+import type { SpotifyStatus } from './spotify/client'
+import { beginLogin, clearToken, completeLoginFromRedirect, loadToken } from './spotify/auth'
 
 type MicState = 'off' | 'requesting' | 'on' | 'denied' | 'unsupported'
 
@@ -34,6 +36,7 @@ export function App() {
   const stageRef = useRef<Stage | null>(null)
   const modeRef = useRef<VisualMode | null>(null)
   const scopeRef = useRef<DebugScope | null>(null)
+  const spotifyRef = useRef<SpotifyClient | null>(null)
   const paramsRef = useRef(resolveParams(useSettings.getState().modeId, {}))
   const debugVisibleRef = useRef(false)
 
@@ -41,26 +44,36 @@ export function App() {
   const paletteId = useSettings((s) => s.paletteId)
   const savedParams = useSettings((s) => s.params)
   const debugVisible = useSettings((s) => s.debugVisible)
-  const toggleDebug = useSettings((s) => s.toggleDebug)
+  const panelVisible = useSettings((s) => s.panelVisible)
+  const dock = useSettings((s) => s.dock)
+  const rotateModes = useSettings((s) => s.rotateModes)
+  const rotatePalettes = useSettings((s) => s.rotatePalettes)
+  const rotateSeconds = useSettings((s) => s.rotateSeconds)
+  const spotifyClientId = useSettings((s) => s.spotifyClientId)
+
   const setMode = useSettings((s) => s.setMode)
   const setPalette = useSettings((s) => s.setPalette)
   const setParam = useSettings((s) => s.setParam)
   const resetParams = useSettings((s) => s.resetParams)
-  const panelVisible = useSettings((s) => s.panelVisible)
+  const toggleDebug = useSettings((s) => s.toggleDebug)
   const togglePanel = useSettings((s) => s.togglePanel)
-  const rotateModes = useSettings((s) => s.rotateModes)
-  const rotatePalettes = useSettings((s) => s.rotatePalettes)
-  const rotateSeconds = useSettings((s) => s.rotateSeconds)
+  const toggleDock = useSettings((s) => s.toggleDock)
   const setRotateModes = useSettings((s) => s.setRotateModes)
   const setRotatePalettes = useSettings((s) => s.setRotatePalettes)
   const setRotateSeconds = useSettings((s) => s.setRotateSeconds)
-  const fullscreen = useFullscreen()
+  const setSpotifyClientId = useSettings((s) => s.setSpotifyClientId)
 
+  const fullscreen = useFullscreen()
   const entry = modeEntry(modeId)
   const params = resolveParams(modeId, savedParams)
 
   const [micState, setMicState] = useState<MicState>('off')
   const [sourceLabel, setSourceLabel] = useState('Synthetic')
+  const [spotifyStatus, setSpotifyStatus] = useState<SpotifyStatus>({
+    state: 'disconnected',
+    track: null,
+    message: null,
+  })
 
   // --- one-time setup: stage, bus, render loop -----------------------------
   useEffect(() => {
@@ -129,6 +142,8 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       modeRef.current?.dispose()
       modeRef.current = null
+      spotifyRef.current?.dispose()
+      spotifyRef.current = null
       bus.dispose()
       stage.dispose()
       busRef.current = null
@@ -212,7 +227,7 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // Don't steal keys from a focused control — the param sliders respond to
-      // arrow keys and a select responds to letters.
+      // arrow keys and a text field wants every letter.
       const target = event.target
       if (
         target instanceof HTMLInputElement ||
@@ -223,7 +238,28 @@ export function App() {
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
+      const state = useSettings.getState()
+      const backwards = event.shiftKey ? -1 : 1
+
+      // Digits jump straight to a mode, so a specific one is one keystroke
+      // away rather than several presses of S.
+      if (/^[1-9]$/.test(event.key)) {
+        const index = Number(event.key) - 1
+        if (index < MODES.length) {
+          stageRef.current?.fadeIn()
+          state.setMode(MODES[index].id)
+        }
+        return
+      }
+
       switch (event.key.toLowerCase()) {
+        case 'c':
+          state.setPalette(cyclePaletteId(state.paletteId, backwards))
+          break
+        case 's':
+          stageRef.current?.fadeIn()
+          state.setMode(cycleModeId(state.modeId, backwards))
+          break
         case 'd':
           toggleDebug()
           break
@@ -240,7 +276,7 @@ export function App() {
   }, [toggleDebug, togglePanel, fullscreen])
 
   // --- microphone ----------------------------------------------------------
-  const enableMic = async () => {
+  const enableMic = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setMicState('unsupported')
       return
@@ -257,189 +293,138 @@ export function App() {
       setMicState('denied')
       setSourceLabel('Synthetic')
     }
-  }
+  }, [])
 
-  const disableMic = () => {
+  const disableMic = useCallback(() => {
     busRef.current?.setAudioSource(null)
     setMicState('off')
     setSourceLabel('Synthetic')
-  }
+  }, [])
+
+  // --- spotify -------------------------------------------------------------
+  const startSpotify = useCallback(
+    (clientId: string) => {
+      const bus = busRef.current
+      const token = loadToken()
+      if (!bus || !token || !clientId) return
+      spotifyRef.current?.dispose()
+      const client = new SpotifyClient(clientId, bus, setSpotifyStatus)
+      spotifyRef.current = client
+      client.start(token)
+    },
+    [],
+  )
+
+  // Handle the redirect back from Spotify, then resume an existing session.
+  useEffect(() => {
+    const clientId = useSettings.getState().spotifyClientId
+    if (!clientId) return
+    let cancelled = false
+    void (async () => {
+      const fromRedirect = await completeLoginFromRedirect(clientId)
+      if (cancelled) return
+      if (fromRedirect || loadToken()) startSpotify(clientId)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [startSpotify])
+
+  const connectSpotify = useCallback(() => {
+    if (!spotifyClientId) return
+    setSpotifyStatus({ state: 'connecting', track: null, message: null })
+    void beginLogin(spotifyClientId)
+  }, [spotifyClientId])
+
+  const disconnectSpotify = useCallback(() => {
+    spotifyRef.current?.dispose()
+    spotifyRef.current = null
+    clearToken()
+    busRef.current?.setTrack(null)
+    busRef.current?.setPlayhead(null)
+    // Back to whichever built-in palette was selected before Spotify took over.
+    busRef.current?.setPalette(paletteById(useSettings.getState().paletteId))
+    setSpotifyStatus({ state: 'disconnected', track: null, message: null })
+  }, [])
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block h-full w-full" />
 
-      <div className="pointer-events-none absolute inset-0 p-4">
-        {!panelVisible && (
-          // The only thing on screen when the panel is closed. Deliberately
-          // dim: this sits on a wall for hours and a bright control would be
-          // the brightest thing in a dark room.
-          <button
-            onClick={togglePanel}
-            title="Show settings (H)"
-            aria-label="Show settings"
-            className="pointer-events-auto rounded-md border border-white/10 bg-black/40 px-2.5 py-1.5 text-white/30 backdrop-blur transition hover:bg-black/70 hover:text-white/80"
-          >
-            <GearIcon />
-          </button>
-        )}
-
-        {panelVisible && (
-        <div className="pointer-events-auto inline-flex max-h-[calc(100vh-2rem)] w-64 flex-col gap-3 overflow-y-auto rounded-lg border border-white/10 bg-black/55 p-4 text-sm text-white/85 backdrop-blur">
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                micState === 'on' ? 'bg-emerald-400' : 'bg-white/35'
-              }`}
+      <div className="pointer-events-none absolute inset-0 flex flex-col p-4">
+        {/* min-h-0 is what lets this row shrink so the footer keeps its space;
+            without it the panel claims the full column and clips the footer. */}
+        <div
+          className={`flex min-h-0 flex-1 ${
+            dock === 'right' ? 'justify-end' : 'justify-start'
+          }`}
+        >
+          {panelVisible ? (
+            <ControlPanel
+              dock={dock}
+              onToggleDock={toggleDock}
+              onClose={togglePanel}
+              fullscreen={fullscreen}
+              micState={micState}
+              sourceLabel={sourceLabel}
+              onEnableMic={() => void enableMic()}
+              onDisableMic={disableMic}
+              modeId={modeId}
+              onSelectMode={setMode}
+              paletteId={paletteId}
+              onSelectPalette={setPalette}
+              schema={entry.params}
+              params={params}
+              onParamChange={(key, value) => setParam(modeId, key, value)}
+              onParamReset={() => resetParams(modeId)}
+              rotateModes={rotateModes}
+              rotatePalettes={rotatePalettes}
+              rotateSeconds={rotateSeconds}
+              onRotateModes={setRotateModes}
+              onRotatePalettes={setRotatePalettes}
+              onRotateSeconds={setRotateSeconds}
+              spotify={
+                <SpotifyPanel
+                  clientId={spotifyClientId}
+                  onClientId={setSpotifyClientId}
+                  status={spotifyStatus}
+                  onConnect={connectSpotify}
+                  onDisconnect={disconnectSpotify}
+                />
+              }
             />
-            <span className="font-mono text-xs uppercase tracking-wide text-white/60">
-              {sourceLabel}
-            </span>
-            <div className="ml-auto flex items-center gap-1">
-              {fullscreen.supported && (
-                <button
-                  onClick={fullscreen.toggle}
-                  title={fullscreen.isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
-                  aria-label={fullscreen.isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                  className="rounded p-1 text-white/45 transition hover:bg-white/10 hover:text-white/90"
-                >
-                  {fullscreen.isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
-                </button>
-              )}
-              <button
-                onClick={togglePanel}
-                title="Hide settings (H)"
-                aria-label="Hide settings"
-                className="rounded p-1 text-white/45 transition hover:bg-white/10 hover:text-white/90"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-
-          {micState === 'on' ? (
-            <button
-              onClick={disableMic}
-              className="rounded border border-white/15 px-3 py-1.5 text-left hover:bg-white/10"
-            >
-              Disconnect microphone
-            </button>
           ) : (
+            // The only thing on screen when the panel is closed. Deliberately
+            // dim: this sits on a wall for hours and a bright control would be
+            // the brightest thing in a dark room.
             <button
-              onClick={enableMic}
-              disabled={micState === 'requesting'}
-              className="rounded border border-white/15 px-3 py-1.5 text-left hover:bg-white/10 disabled:opacity-50"
+              onClick={togglePanel}
+              title="Show settings (H)"
+              aria-label="Show settings"
+              className="pointer-events-auto rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 text-white/25 backdrop-blur transition hover:bg-black/70 hover:text-white/80"
             >
-              {micState === 'requesting' ? 'Requesting…' : 'Enable microphone'}
+              <GearIcon />
             </button>
           )}
-
-          {micState === 'denied' && (
-            <p className="max-w-[15rem] text-xs text-white/45">
-              No microphone access. Running on synthetic audio.
-            </p>
-          )}
-          {micState === 'unsupported' && (
-            <p className="max-w-[15rem] text-xs text-white/45">
-              This browser has no microphone API here. Needs https or localhost.
-            </p>
-          )}
-
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-white/45">Mode</span>
-            <select
-              value={modeId}
-              onChange={(e) => setMode(e.target.value)}
-              className="rounded border border-white/15 bg-black/60 px-2 py-1"
-            >
-              {MODES.map((mode) => (
-                <option key={mode.id} value={mode.id}>
-                  {mode.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <PalettePicker value={paletteId} onChange={setPalette} />
-
-          <div className="flex flex-col gap-2 rounded border border-white/10 p-2">
-            <span className="text-xs uppercase tracking-wide text-white/45">Auto-rotate</span>
-            <label className="flex cursor-pointer items-center justify-between gap-2">
-              <span className="text-xs text-white/70">Shuffle modes</span>
-              <input
-                type="checkbox"
-                checked={rotateModes}
-                onChange={(e) => setRotateModes(e.target.checked)}
-                className="h-3.5 w-3.5 accent-white/80"
-              />
-            </label>
-            <label className="flex cursor-pointer items-center justify-between gap-2">
-              <span className="text-xs text-white/70">Shuffle palettes</span>
-              <input
-                type="checkbox"
-                checked={rotatePalettes}
-                onChange={(e) => setRotatePalettes(e.target.checked)}
-                className="h-3.5 w-3.5 accent-white/80"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="flex items-baseline justify-between gap-2 text-xs text-white/70">
-                Every
-                <span className="font-mono text-[10px] tabular-nums text-white/40">
-                  {formatInterval(rotateSeconds)}
-                </span>
-              </span>
-              <input
-                type="range"
-                min={15}
-                max={1800}
-                step={15}
-                value={rotateSeconds}
-                onChange={(e) => setRotateSeconds(Number(e.target.value))}
-                className="h-1 w-full cursor-pointer appearance-none rounded bg-white/15 accent-white/80"
-              />
-            </label>
-          </div>
-
-          <div className="my-1 h-px bg-white/10" />
-
-          <ParamPanel
-            schema={entry.params}
-            values={params}
-            onChange={(key, value) => setParam(modeId, key, value)}
-            onReset={() => resetParams(modeId)}
-          />
-
-          <p className="text-xs text-white/35">
-            <kbd className="font-mono">D</kbd> debug scope ·{' '}
-            <kbd className="font-mono">F</kbd> fullscreen ·{' '}
-            <kbd className="font-mono">H</kbd> hide
-          </p>
         </div>
+
+        {/* Hidden in fullscreen, and also when the panel is closed — both are
+            the user asking for a bare screen. */}
+        {!fullscreen.isFullscreen && panelVisible && (
+          <div className="flex shrink-0 justify-center pt-3">
+            <Footer />
+          </div>
         )}
       </div>
 
-      {/* Hidden in fullscreen, and also when the panel is closed — both are
-          the user asking for a bare screen. */}
-      {!fullscreen.isFullscreen && panelVisible && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <Footer />
-        </div>
-      )}
-
       <canvas
         ref={debugCanvasRef}
-        className={`absolute right-4 top-4 h-[340px] w-[420px] rounded-lg border border-white/10 ${
+        className={`absolute ${
+          dock === 'right' ? 'left-4' : 'right-4'
+        } top-4 h-[360px] w-[420px] rounded-lg border border-white/10 ${
           debugVisible ? 'block' : 'hidden'
         }`}
       />
     </div>
   )
-}
-
-/** "3m" reads better than "180s" for a rotation interval. */
-function formatInterval(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const minutes = seconds / 60
-  return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`
 }

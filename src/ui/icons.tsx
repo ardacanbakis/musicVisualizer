@@ -41,6 +41,32 @@ export function CloseIcon() {
   )
 }
 
+export function ChevronIcon() {
+  return (
+    <svg {...base} width={11} height={11}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  )
+}
+
+export function DockLeftIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M10 4v16" />
+    </svg>
+  )
+}
+
+export function DockRightIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M14 4v16" />
+    </svg>
+  )
+}
+
 export function GearIcon() {
   return (
     <svg {...base} width={16} height={16}>

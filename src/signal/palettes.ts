@@ -68,6 +68,14 @@ export function paletteById(id: string): Palette {
   return BUILT_IN_PALETTES.find((p) => p.id === id) ?? DEFAULT_PALETTE
 }
 
+/** The palette `delta` places along from `id`, wrapping. */
+export function cyclePaletteId(id: string, delta: number): string {
+  const index = BUILT_IN_PALETTES.findIndex((p) => p.id === id)
+  const from = index === -1 ? 0 : index
+  const count = BUILT_IN_PALETTES.length
+  return BUILT_IN_PALETTES[(from + delta + count * 2) % count].id
+}
+
 export function randomPalette(exclude?: string): Palette {
   const options = BUILT_IN_PALETTES.filter((p) => p.id !== exclude)
   const pool = options.length > 0 ? options : BUILT_IN_PALETTES

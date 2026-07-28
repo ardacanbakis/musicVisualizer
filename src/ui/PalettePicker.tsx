@@ -17,9 +17,9 @@ interface PalettePickerProps {
 
 export function PalettePicker({ value, onChange }: PalettePickerProps) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wide text-white/45">Palette</span>
-      <div className="grid grid-cols-2 gap-1.5">
+    // No heading: this always renders inside a titled section, and its own
+    // label was showing up as a duplicate directly under that title.
+    <div className="grid grid-cols-2 gap-1.5">
         {BUILT_IN_PALETTES.map((palette) => (
           <Swatch
             key={palette.id}
@@ -27,8 +27,7 @@ export function PalettePicker({ value, onChange }: PalettePickerProps) {
             selected={palette.id === value}
             onSelect={() => onChange(palette.id)}
           />
-        ))}
-      </div>
+      ))}
     </div>
   )
 }

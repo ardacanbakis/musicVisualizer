@@ -27,6 +27,14 @@ interface SettingsState {
   rotatePalettes: boolean
   /** Seconds between rotations. */
   rotateSeconds: number
+  /** Which side the settings panel is docked to. */
+  dock: 'left' | 'right'
+  /**
+   * Spotify app client id. Not a secret — it appears in the authorize URL of
+   * every Spotify web app — but it is per-deployment, so it is a setting
+   * rather than a build constant. Empty means Spotify is simply unavailable.
+   */
+  spotifyClientId: string
 
   setMode: (id: string) => void
   setPalette: (id: string) => void
@@ -37,6 +45,8 @@ interface SettingsState {
   setRotateModes: (on: boolean) => void
   setRotatePalettes: (on: boolean) => void
   setRotateSeconds: (seconds: number) => void
+  toggleDock: () => void
+  setSpotifyClientId: (id: string) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -50,6 +60,8 @@ export const useSettings = create<SettingsState>()(
       rotateModes: false,
       rotatePalettes: false,
       rotateSeconds: 180,
+      dock: 'left',
+      spotifyClientId: '',
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -72,6 +84,8 @@ export const useSettings = create<SettingsState>()(
       setRotatePalettes: (on) => set({ rotatePalettes: on }),
       setRotateSeconds: (seconds) =>
         set({ rotateSeconds: Math.max(15, Math.round(seconds)) }),
+      toggleDock: () => set((state) => ({ dock: state.dock === 'left' ? 'right' : 'left' })),
+      setSpotifyClientId: (id) => set({ spotifyClientId: id.trim() }),
     }),
     {
       name: 'ambient-visualizer-settings',
