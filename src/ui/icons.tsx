@@ -67,6 +67,25 @@ export function DockRightIcon() {
   )
 }
 
+export function SidebarIcon() {
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d="M12 9h5M12 13h5" />
+    </svg>
+  )
+}
+
+export function CompactIcon() {
+  return (
+    <svg {...base}>
+      <rect x="2" y="9" width="20" height="6" rx="3" />
+      <path d="M7 12h.01M12 12h.01M17 12h.01" />
+    </svg>
+  )
+}
+
 export function GearIcon() {
   return (
     <svg {...base} width={16} height={16}>

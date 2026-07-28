@@ -20,6 +20,15 @@ interface SpotifyPanelProps {
   status: SpotifyStatus
   onConnect: () => void
   onDisconnect: () => void
+  showNowPlaying: boolean
+  onShowNowPlaying: (on: boolean) => void
+}
+
+const PALETTE_TEXT: Record<string, string> = {
+  pending: 'Reading album colours…',
+  applied: 'Palette is following the album art',
+  unavailable: 'Using the built-in palette',
+  off: 'Album colours off',
 }
 
 export function SpotifyPanel({
@@ -28,6 +37,8 @@ export function SpotifyPanel({
   status,
   onConnect,
   onDisconnect,
+  showNowPlaying,
+  onShowNowPlaying,
 }: SpotifyPanelProps) {
   const [showSetup, setShowSetup] = useState(false)
   const [draft, setDraft] = useState(clientId)
@@ -44,8 +55,16 @@ export function SpotifyPanel({
           <span className="truncate text-[11px] text-white/45" title={status.track.artist}>
             {status.track.artist}
           </span>
-          <span className="mt-1 text-[10px] text-white/30">
-            Palette is following the album art.
+          {/* What actually happened to the palette. Without this the whole
+              connection looks like it does nothing whenever extraction fails,
+              which it can for perfectly ordinary reasons. */}
+          <span
+            className={`mt-1 text-[10px] ${
+              status.palette === 'applied' ? 'text-emerald-200/50' : 'text-white/30'
+            }`}
+          >
+            {PALETTE_TEXT[status.palette ?? ''] ?? ''}
+            {status.paletteDetail ? ` — ${status.paletteDetail}` : ''}
           </span>
         </div>
       ) : (
@@ -76,6 +95,18 @@ export function SpotifyPanel({
         <p className="text-[10px] leading-snug text-amber-200/50">
           Needs a Spotify client id first.
         </p>
+      )}
+
+      {connected && (
+        <label className="flex cursor-pointer items-center justify-between gap-2">
+          <span className="text-xs text-white/70">Now Playing card</span>
+          <input
+            type="checkbox"
+            checked={showNowPlaying}
+            onChange={(e) => onShowNowPlaying(e.target.checked)}
+            className="h-3.5 w-3.5 accent-white/80"
+          />
+        </label>
       )}
 
       <button

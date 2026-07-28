@@ -12,6 +12,7 @@
 import type { SignalBus } from '../signal/bus'
 import type { TrackInfo } from '../signal/types'
 import { paletteFromArtwork } from './albumPalette'
+import type { ExtractionFailure } from './albumPalette'
 import { Playhead } from './playhead'
 import { clearToken, loadToken, needsRefresh, refreshToken } from './auth'
 import type { StoredToken } from './auth'
@@ -23,11 +24,24 @@ const RATE_LIMIT_BACKOFF_MS = 30_000
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+const FAILURE_TEXT: Record<ExtractionFailure, string> = {
+  'image-failed': 'Album art would not load',
+  'canvas-tainted': 'Album art blocked by CORS',
+  'too-few-colours': 'Album art too plain to build a palette',
+  'build-failed': 'Could not build a palette',
+}
+
 export interface SpotifyStatus {
   state: ConnectionState
   track: TrackInfo | null
   /** Human-readable, for the settings panel only. Never shown on the canvas. */
   message: string | null
+  /**
+   * What happened to the album palette. Reported because a silent failure
+   * here makes the entire Spotify connection look like it does nothing.
+   */
+  palette: 'pending' | 'applied' | 'unavailable' | 'off' | null
+  paletteDetail: string | null
 }
 
 export class SpotifyClient {
@@ -39,7 +53,16 @@ export class SpotifyClient {
   private disposed = false
   private backoffUntil = 0
 
-  private status: SpotifyStatus = { state: 'disconnected', track: null, message: null }
+  private status: SpotifyStatus = {
+    state: 'disconnected',
+    track: null,
+    message: null,
+    palette: null,
+    paletteDetail: null,
+  }
+
+  /** When false, the album palette is not applied and the user's pick stands. */
+  useAlbumColours = true
 
   constructor(
     private clientId: string,
@@ -49,7 +72,13 @@ export class SpotifyClient {
 
   start(token: StoredToken): void {
     this.token = token
-    this.setStatus({ state: 'connecting', track: null, message: null })
+    this.setStatus({
+      state: 'connecting',
+      track: null,
+      message: null,
+      palette: null,
+      paletteDetail: null,
+    })
     void this.poll()
     this.timer = window.setInterval(() => void this.poll(), POLL_INTERVAL_MS)
     // Advancing the playhead on its own timer rather than in the render loop
@@ -68,7 +97,13 @@ export class SpotifyClient {
     this.bus.setTrack(null)
     this.bus.setPlayhead(null)
     this.currentTrackId = null
-    this.setStatus({ state: 'disconnected', track: null, message: null })
+    this.setStatus({
+      state: 'disconnected',
+      track: null,
+      message: null,
+      palette: null,
+      paletteDetail: null,
+    })
   }
 
   dispose(): void {
@@ -145,7 +180,13 @@ export class SpotifyClient {
       this.bus.setTrack(null)
       this.bus.setPlayhead(null)
       this.currentTrackId = null
-      this.setStatus({ state: 'connected', track: null, message: 'Nothing playing' })
+      this.setStatus({
+        state: 'connected',
+        track: null,
+        message: 'Nothing playing',
+        palette: null,
+        paletteDetail: null,
+      })
       return
     }
 
@@ -163,7 +204,13 @@ export class SpotifyClient {
       // Playing something that is not a track — a podcast or a local file.
       this.bus.setTrack(null)
       this.bus.setPlayhead(null)
-      this.setStatus({ state: 'connected', track: null, message: 'Nothing playing' })
+      this.setStatus({
+        state: 'connected',
+        track: null,
+        message: 'Not a track (podcast or local file)',
+        palette: null,
+        paletteDetail: null,
+      })
       return
     }
 
@@ -188,28 +235,42 @@ export class SpotifyClient {
       this.currentTrackId = track.id
       this.playhead.reset(sample, performance.now())
       this.bus.setTrack(track)
-      this.setStatus({ state: 'connected', track, message: null })
+      this.setStatus({
+        state: 'connected',
+        track,
+        message: null,
+        palette: this.useAlbumColours ? (track.artworkUrl ? 'pending' : 'unavailable') : 'off',
+        paletteDetail: track.artworkUrl ? null : 'No album art for this track',
+      })
       // Fire and forget: the palette arriving a moment later just means the
       // crossfade starts a moment later, which nobody can perceive.
       void this.applyPalette(track)
     } else {
       this.playhead.sync(sample, performance.now())
-      if (this.status.track?.id !== track.id) {
-        this.setStatus({ state: 'connected', track, message: null })
-      }
     }
 
     this.bus.setPlayhead(this.playhead.fraction)
   }
 
   private async applyPalette(track: TrackInfo): Promise<void> {
-    if (!track.artworkUrl) return
-    const palette = await paletteFromArtwork(track.artworkUrl, track.id)
-    if (this.disposed || !palette) return
+    if (!track.artworkUrl || !this.useAlbumColours) return
+    const result = await paletteFromArtwork(track.artworkUrl, track.id)
+    if (this.disposed) return
     // Guard against a slow extraction landing after the user has skipped on.
     if (this.currentTrackId !== track.id) return
+
+    if (!result.palette) {
+      this.setStatus({
+        ...this.status,
+        palette: 'unavailable',
+        paletteDetail: FAILURE_TEXT[result.failure ?? 'build-failed'],
+      })
+      return
+    }
+
     // Not immediate: the bus crossfades over ~2s. Colour never hard-cuts.
-    this.bus.setPalette(palette)
+    this.bus.setPalette(result.palette)
+    this.setStatus({ ...this.status, palette: 'applied', paletteDetail: null })
   }
 }
 

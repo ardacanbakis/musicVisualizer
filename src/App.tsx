@@ -18,6 +18,8 @@ import type { VisualMode } from './render/types'
 import { resolveParams, useSettings } from './store/settings'
 import { DebugScope } from './ui/debugOverlay'
 import { ControlPanel } from './ui/ControlPanel'
+import { CompactBar } from './ui/CompactBar'
+import { NowPlaying } from './ui/NowPlaying'
 import { Footer } from './ui/Footer'
 import { GearIcon } from './ui/icons'
 import { useFullscreen } from './ui/useFullscreen'
@@ -50,6 +52,8 @@ export function App() {
   const rotatePalettes = useSettings((s) => s.rotatePalettes)
   const rotateSeconds = useSettings((s) => s.rotateSeconds)
   const spotifyClientId = useSettings((s) => s.spotifyClientId)
+  const menuLayout = useSettings((s) => s.menuLayout)
+  const showNowPlaying = useSettings((s) => s.showNowPlaying)
 
   const setMode = useSettings((s) => s.setMode)
   const setPalette = useSettings((s) => s.setPalette)
@@ -62,6 +66,8 @@ export function App() {
   const setRotatePalettes = useSettings((s) => s.setRotatePalettes)
   const setRotateSeconds = useSettings((s) => s.setRotateSeconds)
   const setSpotifyClientId = useSettings((s) => s.setSpotifyClientId)
+  const toggleMenuLayout = useSettings((s) => s.toggleMenuLayout)
+  const setShowNowPlaying = useSettings((s) => s.setShowNowPlaying)
 
   const fullscreen = useFullscreen()
   const entry = modeEntry(modeId)
@@ -73,7 +79,10 @@ export function App() {
     state: 'disconnected',
     track: null,
     message: null,
+    palette: null,
+    paletteDetail: null,
   })
+  const [progress, setProgress] = useState<number | null>(null)
 
   // --- one-time setup: stage, bus, render loop -----------------------------
   useEffect(() => {
@@ -223,6 +232,17 @@ export function App() {
     }
   }, [debugVisible])
 
+  useEffect(() => {
+    if (!spotifyStatus.track) {
+      setProgress(null)
+      return
+    }
+    const timer = window.setInterval(() => {
+      setProgress(busRef.current?.currentPlayhead ?? null)
+    }, 200)
+    return () => window.clearInterval(timer)
+  }, [spotifyStatus.track])
+
   // --- keyboard ------------------------------------------------------------
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -269,11 +289,14 @@ export function App() {
         case 'h':
           togglePanel()
           break
+        case 'm':
+          toggleMenuLayout()
+          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleDebug, togglePanel, fullscreen])
+  }, [toggleDebug, togglePanel, toggleMenuLayout, fullscreen])
 
   // --- microphone ----------------------------------------------------------
   const enableMic = useCallback(async () => {
@@ -332,7 +355,13 @@ export function App() {
 
   const connectSpotify = useCallback(() => {
     if (!spotifyClientId) return
-    setSpotifyStatus({ state: 'connecting', track: null, message: null })
+    setSpotifyStatus({
+      state: 'connecting',
+      track: null,
+      message: null,
+      palette: null,
+      paletteDetail: null,
+    })
     void beginLogin(spotifyClientId)
   }, [spotifyClientId])
 
@@ -344,12 +373,33 @@ export function App() {
     busRef.current?.setPlayhead(null)
     // Back to whichever built-in palette was selected before Spotify took over.
     busRef.current?.setPalette(paletteById(useSettings.getState().paletteId))
-    setSpotifyStatus({ state: 'disconnected', track: null, message: null })
+    setSpotifyStatus({
+      state: 'disconnected',
+      track: null,
+      message: null,
+      palette: null,
+      paletteDetail: null,
+    })
   }, [])
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block h-full w-full" />
+
+      {/* Menu hidden: one small button, positioned on its own rather than as
+          a stretched child of the layout column. */}
+      {!panelVisible && (
+        <button
+          onClick={togglePanel}
+          title="Show menu (H)"
+          aria-label="Show menu"
+          className={`absolute top-4 ${
+            dock === 'right' ? 'right-4' : 'left-4'
+          } rounded-lg border border-white/10 bg-black/40 p-2 text-white/25 backdrop-blur transition hover:bg-black/70 hover:text-white/80`}
+        >
+          <GearIcon />
+        </button>
+      )}
 
       <div className="pointer-events-none absolute inset-0 flex flex-col p-4">
         {/* min-h-0 is what lets this row shrink so the footer keeps its space;
@@ -359,10 +409,11 @@ export function App() {
             dock === 'right' ? 'justify-end' : 'justify-start'
           }`}
         >
-          {panelVisible ? (
+          {panelVisible && menuLayout === 'sidebar' ? (
             <ControlPanel
               dock={dock}
               onToggleDock={toggleDock}
+              onSwitchLayout={toggleMenuLayout}
               onClose={togglePanel}
               fullscreen={fullscreen}
               micState={micState}
@@ -390,28 +441,49 @@ export function App() {
                   status={spotifyStatus}
                   onConnect={connectSpotify}
                   onDisconnect={disconnectSpotify}
+                  showNowPlaying={showNowPlaying}
+                  onShowNowPlaying={setShowNowPlaying}
                 />
               }
             />
-          ) : (
-            // The only thing on screen when the panel is closed. Deliberately
-            // dim: this sits on a wall for hours and a bright control would be
-            // the brightest thing in a dark room.
-            <button
-              onClick={togglePanel}
-              title="Show settings (H)"
-              aria-label="Show settings"
-              className="pointer-events-auto rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 text-white/25 backdrop-blur transition hover:bg-black/70 hover:text-white/80"
-            >
-              <GearIcon />
-            </button>
-          )}
+          ) : null}
         </div>
 
-        {/* Hidden in fullscreen, and also when the panel is closed — both are
-            the user asking for a bare screen. */}
-        {!fullscreen.isFullscreen && panelVisible && (
-          <div className="flex shrink-0 justify-center pt-3">
+        {/* Now Playing sits opposite the sidebar so the two never collide. */}
+        {showNowPlaying && spotifyStatus.track && (
+          <div
+            className={`flex shrink-0 pb-3 ${
+              dock === 'right' ? 'justify-start' : 'justify-end'
+            }`}
+          >
+            <NowPlaying
+              track={spotifyStatus.track}
+              progress={progress}
+              side={dock === 'right' ? 'left' : 'right'}
+            />
+          </div>
+        )}
+
+        {panelVisible && menuLayout === 'compact' && (
+          <div className="flex shrink-0 justify-center pb-2">
+            <CompactBar
+              micState={micState}
+              modeId={modeId}
+              onSelectMode={setMode}
+              paletteId={paletteId}
+              onSelectPalette={setPalette}
+              onSwitchLayout={toggleMenuLayout}
+              onClose={togglePanel}
+              fullscreen={fullscreen}
+            />
+          </div>
+        )}
+
+        {/* Tracks the menu rather than fullscreen: hiding the menu is the
+            request for a bare screen, and fullscreen with the menu open is
+            still a view someone is looking at. */}
+        {panelVisible && (
+          <div className="flex shrink-0 justify-center pt-1">
             <Footer />
           </div>
         )}

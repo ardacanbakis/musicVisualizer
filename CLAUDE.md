@@ -132,12 +132,14 @@ src/
     albumPalette.ts album art -> downsample -> worker -> buildPalette
     kmeans.ts       pure, seeded, deterministic; kmeans.worker.ts wraps it
   ui/
-    ControlPanel.tsx  the dockable panel; sections, mode list, shortcuts
+    ControlPanel.tsx  sidebar layout; dockable, collapsible sections
+    CompactBar.tsx    the alternative layout: a bottom strip for driving it
+    NowPlaying.tsx    album art + interpolated progress, opposite the sidebar
     SpotifyPanel.tsx  connect/setup; errors appear HERE and nowhere else
     debugOverlay.ts the debug scope (press D)
     ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
     PalettePicker.tsx  swatch grid; palettes are picked by sight, not by name
-    Footer.tsx      social links; hidden in fullscreen and when the panel is
+    Footer.tsx      social links; visible whenever the menu is
   store/
     settings.ts     zustand + localStorage
 ```
@@ -194,6 +196,11 @@ that is the test any change here has to pass.
   token, revoked app, offline, a 429, album art the CDN serves without CORS
   headers so the canvas taints and `getImageData` throws — all of it lands in
   the settings panel and never on the canvas. This thing lives on a wall.
+- **What the connection actually does**: supplies the palette and the track
+  identity. Nothing rhythmic — `bands`, `onset` and `bpm` always come from the
+  microphone. If album colours fail to extract, the connection has no visible
+  effect at all, which is why every failure reason is now reported in the
+  panel rather than swallowed.
 - **Palette extraction is deterministic**, seeded from the track id, so a
   track you have heard before comes back the same colour. k-means runs in a
   worker because it lands exactly when a crossfade starts.
@@ -265,3 +272,6 @@ the shader wrong?", and this answers it in about two seconds.
    auto-rotate fades the incoming mode up from black rather than a true
    two-mode crossfade, which would need both modes live at once)
 7. Frame capture and high-resolution still export
+
+Modes are listed in `src/render/registry.ts`; the fireplace was removed at the
+user's request and is recoverable from git history.

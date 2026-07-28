@@ -136,6 +136,11 @@ export class SignalBus {
     this.playhead = playhead
   }
 
+  /** The interpolated playhead, for UI that wants it outside the render loop. */
+  get currentPlayhead(): number | null {
+    return this.playhead
+  }
+
   // -------------------------------------------------------------------------
   // Per-frame
   // -------------------------------------------------------------------------

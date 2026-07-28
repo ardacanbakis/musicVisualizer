@@ -108,26 +108,45 @@ function samplePixels(image: HTMLImageElement): Uint8ClampedArray | null {
  * @param trackId used as the clustering seed, so the same track always yields
  *                the same palette — including across reloads.
  */
+export type ExtractionFailure =
+  | 'image-failed'
+  | 'canvas-tainted'
+  | 'too-few-colours'
+  | 'build-failed'
+
+export interface ExtractionResult {
+  palette: Palette | null
+  /** Why it failed, for the settings panel. Null on success. */
+  failure: ExtractionFailure | null
+}
+
 export async function paletteFromArtwork(
   url: string,
   trackId: string,
-): Promise<Palette | null> {
+): Promise<ExtractionResult> {
+  // Every failure below is ordinary and none of them may reach the canvas —
+  // but returning a bare null made them indistinguishable from each other and
+  // from "no artwork", which left the whole feature looking like it simply
+  // did nothing. The reason is reported in the settings panel.
   const image = await loadImage(url)
-  if (!image) return null
+  if (!image) return { palette: null, failure: 'image-failed' }
 
   const pixels = samplePixels(image)
-  if (!pixels) return null
+  if (!pixels) return { palette: null, failure: 'canvas-tainted' }
 
   const clusters = await clusterInWorker(pixels, hashSeed(trackId))
-  if (clusters.length < 2) return null
+  if (clusters.length < 2) return { palette: null, failure: 'too-few-colours' }
 
   const colors: RGB[] = clusters.map((c) => c.color)
   const weights = clusters.map((c) => c.weight)
 
   try {
-    return buildPalette(`spotify:${trackId}`, 'Album', colors, weights)
+    return {
+      palette: buildPalette(`spotify:${trackId}`, 'Album', colors, weights),
+      failure: null,
+    }
   } catch {
-    return null
+    return { palette: null, failure: 'build-failed' }
   }
 }
 

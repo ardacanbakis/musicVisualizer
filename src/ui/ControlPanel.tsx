@@ -26,6 +26,7 @@ import {
   ChevronIcon,
   CloseIcon,
   DockLeftIcon,
+  CompactIcon,
   DockRightIcon,
   ExitFullscreenIcon,
   FullscreenIcon,
@@ -36,6 +37,7 @@ export type Dock = 'left' | 'right'
 interface ControlPanelProps {
   dock: Dock
   onToggleDock: () => void
+  onSwitchLayout: () => void
   onClose: () => void
   fullscreen: { isFullscreen: boolean; supported: boolean; toggle: () => void }
 
@@ -85,6 +87,9 @@ export function ControlPanel(props: ControlPanelProps) {
           {props.sourceLabel}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
+          <IconButton onClick={props.onSwitchLayout} title="Compact menu (M)">
+            <CompactIcon />
+          </IconButton>
           <IconButton
             onClick={props.onToggleDock}
             title={dock === 'left' ? 'Dock right' : 'Dock left'}
@@ -156,15 +161,6 @@ export function ControlPanel(props: ControlPanelProps) {
           <PalettePicker value={props.paletteId} onChange={props.onSelectPalette} />
         </Section>
 
-        <Section id="params" title="Mode settings" defaultOpen>
-          <ParamPanel
-            schema={props.schema}
-            values={props.params}
-            onChange={props.onParamChange}
-            onReset={props.onParamReset}
-          />
-        </Section>
-
         <Section id="rotate" title="Auto-rotate">
           <div className="flex flex-col gap-2">
             <Toggle
@@ -197,9 +193,18 @@ export function ControlPanel(props: ControlPanelProps) {
           </div>
         </Section>
 
-        <Section id="spotify" title="Spotify">{props.spotify}</Section>
+        <Section id="params" title="Mode settings" defaultOpen>
+          <ParamPanel
+            schema={props.schema}
+            values={props.params}
+            onChange={props.onParamChange}
+            onReset={props.onParamReset}
+          />
+        </Section>
 
-        <Section id="shortcuts" title="Shortcuts">
+        <Section id="spotify" title="Spotify" defaultOpen>{props.spotify}</Section>
+
+        <Section id="shortcuts" title="Shortcuts" defaultOpen>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] text-white/40">
             <Shortcut keys="C / ⇧C" label="Next / previous palette" />
             <Shortcut keys="S / ⇧S" label="Next / previous mode" />
@@ -207,6 +212,7 @@ export function ControlPanel(props: ControlPanelProps) {
             <Shortcut keys="F" label="Fullscreen" />
             <Shortcut keys="H" label="Hide this panel" />
             <Shortcut keys="D" label="Debug scope" />
+            <Shortcut keys="M" label="Compact / sidebar menu" />
           </dl>
         </Section>
       </div>
@@ -282,7 +288,7 @@ function Section({
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
-  const storageKey = `amb-section-${id}`
+  const storageKey = `amb-section-v2-${id}`
   const [open, setOpen] = useState(() => {
     try {
       const saved = sessionStorage.getItem(storageKey)

@@ -30,6 +30,13 @@ interface SettingsState {
   /** Which side the settings panel is docked to. */
   dock: 'left' | 'right'
   /**
+   * Sidebar for setting things up, compact bar for driving it while watching.
+   * Two genuinely different control sets, not the same panel repositioned.
+   */
+  menuLayout: 'sidebar' | 'compact'
+  /** Show the Now Playing card when Spotify has a track. */
+  showNowPlaying: boolean
+  /**
    * Spotify app client id. Not a secret — it appears in the authorize URL of
    * every Spotify web app — but it is per-deployment, so it is a setting
    * rather than a build constant. Empty means Spotify is simply unavailable.
@@ -47,6 +54,8 @@ interface SettingsState {
   setRotateSeconds: (seconds: number) => void
   toggleDock: () => void
   setSpotifyClientId: (id: string) => void
+  toggleMenuLayout: () => void
+  setShowNowPlaying: (on: boolean) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -62,6 +71,8 @@ export const useSettings = create<SettingsState>()(
       rotateSeconds: 180,
       dock: 'left',
       spotifyClientId: '',
+      menuLayout: 'sidebar',
+      showNowPlaying: true,
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -86,6 +97,11 @@ export const useSettings = create<SettingsState>()(
         set({ rotateSeconds: Math.max(15, Math.round(seconds)) }),
       toggleDock: () => set((state) => ({ dock: state.dock === 'left' ? 'right' : 'left' })),
       setSpotifyClientId: (id) => set({ spotifyClientId: id.trim() }),
+      toggleMenuLayout: () =>
+        set((state) => ({
+          menuLayout: state.menuLayout === 'sidebar' ? 'compact' : 'sidebar',
+        })),
+      setShowNowPlaying: (on) => set({ showNowPlaying: on }),
     }),
     {
       name: 'ambient-visualizer-settings',
