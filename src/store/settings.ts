@@ -17,12 +17,16 @@ interface SettingsState {
   /** Sparse: only params the user has actually changed. */
   params: Record<string, ParamValues>
   debugVisible: boolean
+  /** Whether the settings panel is shown. Persisted: a wall display should
+   *  come back up bare after a power cut, not with the controls open. */
+  panelVisible: boolean
 
   setMode: (id: string) => void
   setPalette: (id: string) => void
   setParam: (modeId: string, key: string, value: ParamValue) => void
   resetParams: (modeId: string) => void
   toggleDebug: () => void
+  togglePanel: () => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -32,6 +36,7 @@ export const useSettings = create<SettingsState>()(
       paletteId: DEFAULT_PALETTE.id,
       params: {},
       debugVisible: false,
+      panelVisible: true,
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -49,6 +54,7 @@ export const useSettings = create<SettingsState>()(
           return { params: next }
         }),
       toggleDebug: () => set((state) => ({ debugVisible: !state.debugVisible })),
+      togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
     }),
     {
       name: 'ambient-visualizer-settings',

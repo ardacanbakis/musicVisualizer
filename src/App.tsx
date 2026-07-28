@@ -19,6 +19,8 @@ import { resolveParams, useSettings } from './store/settings'
 import { DebugScope } from './ui/debugOverlay'
 import { ParamPanel } from './ui/ParamPanel'
 import { modeEntry } from './render/registry'
+import { useFullscreen } from './ui/useFullscreen'
+import { CloseIcon, ExitFullscreenIcon, FullscreenIcon, GearIcon } from './ui/icons'
 
 type MicState = 'off' | 'requesting' | 'on' | 'denied' | 'unsupported'
 
@@ -42,6 +44,9 @@ export function App() {
   const setPalette = useSettings((s) => s.setPalette)
   const setParam = useSettings((s) => s.setParam)
   const resetParams = useSettings((s) => s.resetParams)
+  const panelVisible = useSettings((s) => s.panelVisible)
+  const togglePanel = useSettings((s) => s.togglePanel)
+  const fullscreen = useFullscreen()
 
   const entry = modeEntry(modeId)
   const params = resolveParams(modeId, savedParams)
@@ -165,12 +170,33 @@ export function App() {
   // --- keyboard ------------------------------------------------------------
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement) return
-      if (event.key === 'd' || event.key === 'D') toggleDebug()
+      // Don't steal keys from a focused control — the param sliders respond to
+      // arrow keys and a select responds to letters.
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        return
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+
+      switch (event.key.toLowerCase()) {
+        case 'd':
+          toggleDebug()
+          break
+        case 'f':
+          fullscreen.toggle()
+          break
+        case 'h':
+          togglePanel()
+          break
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleDebug])
+  }, [toggleDebug, togglePanel, fullscreen])
 
   // --- microphone ----------------------------------------------------------
   const enableMic = async () => {
@@ -203,6 +229,21 @@ export function App() {
       <canvas ref={canvasRef} className="block h-full w-full" />
 
       <div className="pointer-events-none absolute inset-0 p-4">
+        {!panelVisible && (
+          // The only thing on screen when the panel is closed. Deliberately
+          // dim: this sits on a wall for hours and a bright control would be
+          // the brightest thing in a dark room.
+          <button
+            onClick={togglePanel}
+            title="Show settings (H)"
+            aria-label="Show settings"
+            className="pointer-events-auto rounded-md border border-white/10 bg-black/40 px-2.5 py-1.5 text-white/30 backdrop-blur transition hover:bg-black/70 hover:text-white/80"
+          >
+            <GearIcon />
+          </button>
+        )}
+
+        {panelVisible && (
         <div className="pointer-events-auto inline-flex max-h-[calc(100vh-2rem)] w-64 flex-col gap-3 overflow-y-auto rounded-lg border border-white/10 bg-black/55 p-4 text-sm text-white/85 backdrop-blur">
           <div className="flex items-center gap-2">
             <span
@@ -213,6 +254,26 @@ export function App() {
             <span className="font-mono text-xs uppercase tracking-wide text-white/60">
               {sourceLabel}
             </span>
+            <div className="ml-auto flex items-center gap-1">
+              {fullscreen.supported && (
+                <button
+                  onClick={fullscreen.toggle}
+                  title={fullscreen.isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
+                  aria-label={fullscreen.isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                  className="rounded p-1 text-white/45 transition hover:bg-white/10 hover:text-white/90"
+                >
+                  {fullscreen.isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+                </button>
+              )}
+              <button
+                onClick={togglePanel}
+                title="Hide settings (H)"
+                aria-label="Hide settings"
+                className="rounded p-1 text-white/45 transition hover:bg-white/10 hover:text-white/90"
+              >
+                <CloseIcon />
+              </button>
+            </div>
           </div>
 
           {micState === 'on' ? (
@@ -282,8 +343,13 @@ export function App() {
             onReset={() => resetParams(modeId)}
           />
 
-          <p className="text-xs text-white/35">Press D for the debug scope.</p>
+          <p className="text-xs text-white/35">
+            <kbd className="font-mono">D</kbd> debug scope ·{' '}
+            <kbd className="font-mono">F</kbd> fullscreen ·{' '}
+            <kbd className="font-mono">H</kbd> hide
+          </p>
         </div>
+        )}
       </div>
 
       <canvas

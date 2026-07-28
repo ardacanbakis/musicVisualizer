@@ -9,14 +9,23 @@
  * GPU work belongs in `init()`.
  */
 import { createBarsMode } from './modes/bars'
+import { createFireplaceMode } from './modes/fireplace'
 import { createFlowFieldMode } from './modes/flowField'
+import { createLavaLampMode } from './modes/lavaLamp'
+import { createReactionDiffusionMode } from './modes/reactionDiffusion'
+import { createTerrainMode } from './modes/terrain'
+import { createTilingMode } from './modes/tiling'
 import type { ParamSchema, VisualMode, VisualModeFactory } from './types'
 
+// Adding a mode is one import above and one entry here. Nothing else.
 const FACTORIES: VisualModeFactory[] = [
   createFlowFieldMode,
+  createFireplaceMode,
+  createLavaLampMode,
+  createReactionDiffusionMode,
+  createTilingMode,
+  createTerrainMode,
   createBarsMode,
-  // Phase 4: reaction-diffusion, geometric tiling, 3D terrain
-  // Phase 4: fireplace, lava lamp
 ]
 
 export interface ModeEntry {

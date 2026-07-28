@@ -217,7 +217,9 @@ the shader wrong?", and this answers it in about two seconds.
 3. ✅ Mode registry, auto-generated param UI, flow field
    (luminance clamp and reduced-motion pulled forward from 6, so every mode
    from here is built against them rather than retrofitted)
-4. Reaction-diffusion, geometric tiling, 3D terrain, fireplace, lava lamp
+4. ✅ Reaction-diffusion, geometric tiling, 3D terrain, fireplace, lava lamp
 5. Spotify auth, polling, palette extraction, crossfade
-6. Ambient shell — fullscreen, auto-hide, wake lock, auto-rotate
+6. Ambient shell — auto-hide, wake lock, auto-rotate
+   (a manual fullscreen button and a settings show/hide toggle landed early,
+   in phase 4; the auto-hide-on-idle behaviour is still phase 6)
 7. Frame capture and high-resolution still export

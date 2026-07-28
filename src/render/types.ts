@@ -123,6 +123,16 @@ export interface RenderContext {
   /** Allocate a feedback buffer pair. The mode owns it and must dispose it. */
   createPingPong(options?: PingPongOptions): PingPong
   /**
+   * The buffer this mode's output must end up in. Only needed by modes that
+   * render a real scene through `renderer.render()` rather than blitting a
+   * full-screen quad — those must set it as the render target themselves, and
+   * are responsible for clearing it. Has a depth buffer.
+   *
+   * Modes using `blit()` never touch this; passing null as the blit target
+   * already points here.
+   */
+  readonly outputTarget: THREE.WebGLRenderTarget
+  /**
    * Draw a full-screen quad with `material` into `target` (null = the canvas).
    * The quad's geometry and camera are shared, so this costs nothing per mode.
    */

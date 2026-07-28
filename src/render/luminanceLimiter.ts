@@ -66,7 +66,10 @@ export class LuminanceLimiter {
       type: THREE.HalfFloatType,
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
-      depthBuffer: false,
+      // Depth is on because modes that render real geometry (3D terrain) draw
+      // into this target and need depth testing. Full-screen-quad modes simply
+      // never use it; the cost is one depth attachment for the whole app.
+      depthBuffer: true,
       stencilBuffer: false,
       generateMipmaps: false,
     })
