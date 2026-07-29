@@ -23,10 +23,11 @@ interface NowPlayingProps {
   track: TrackInfo
   /** 0..1, or null. Read from the bus so it is the interpolated value. */
   progress: number | null
-  side: 'left' | 'right'
+  /** Multiplier on the base width; art and type scale with it. */
+  size: number
 }
 
-export function NowPlaying({ track, progress, side }: NowPlayingProps) {
+export function NowPlaying({ track, progress, size }: NowPlayingProps) {
   const [artFailed, setArtFailed] = useState(false)
 
   // A new track gets a fresh chance at its artwork; without this the card
@@ -36,29 +37,35 @@ export function NowPlaying({ track, progress, side }: NowPlayingProps) {
   }, [track.id])
 
   return (
+    // Sized with inline styles rather than Tailwind classes: the scale is a
+    // continuous slider value, and Tailwind can only emit classes it can see
+    // in the source at build time.
     <div
-      className={`pointer-events-auto flex w-64 items-center gap-3 rounded-xl border border-white/10 bg-black/55 p-2.5 backdrop-blur-md transition-opacity ${
-        side === 'right' ? 'ml-auto' : ''
-      }`}
+      className="pointer-events-auto flex items-center gap-3 rounded-xl border border-white/10 bg-black/55 backdrop-blur-md"
+      style={{ width: `${16 * size}rem`, padding: `${0.625 * size}rem`, fontSize: `${size}rem` }}
     >
       {track.artworkUrl && !artFailed ? (
         <img
           src={track.artworkUrl}
           alt=""
           onError={() => setArtFailed(true)}
-          className="h-12 w-12 shrink-0 rounded-md object-cover"
+          className="shrink-0 rounded-md object-cover"
+          style={{ width: `${3 * size}rem`, height: `${3 * size}rem` }}
         />
       ) : (
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-white/5 text-white/20">
+        <div
+          className="flex shrink-0 items-center justify-center rounded-md bg-white/5 text-white/20"
+          style={{ width: `${3 * size}rem`, height: `${3 * size}rem` }}
+        >
           <NoteIcon />
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate text-xs text-white/85" title={track.title}>
+        <span className="truncate text-white/85" style={{ fontSize: '0.75em' }} title={track.title}>
           {track.title || 'Unknown track'}
         </span>
-        <span className="truncate text-[11px] text-white/40" title={track.artist}>
+        <span className="truncate text-white/40" style={{ fontSize: '0.69em' }} title={track.artist}>
           {track.artist}
         </span>
         <div className="mt-0.5 h-0.5 w-full overflow-hidden rounded-full bg-white/10">

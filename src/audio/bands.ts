@@ -100,6 +100,38 @@ export function decibelsToLinear(
 }
 
 /**
+ * Centre frequency in Hz of each band, from the same log spacing the band
+ * edges use. For labelling a spectrum display — this is the *intended*
+ * spacing, independent of sample rate, which is what a reader wants on an
+ * axis rather than the bin-quantised actual edges.
+ */
+export function bandCenterFrequencies(
+  bandCount: number,
+  fMin = F_MIN,
+  fMax = F_MAX,
+): Float32Array {
+  const out = new Float32Array(bandCount)
+  const logMin = Math.log(fMin)
+  const logMax = Math.log(fMax)
+  for (let i = 0; i < bandCount; i++) {
+    // Midpoint of band i in log space.
+    const t = (i + 0.5) / bandCount
+    out[i] = Math.exp(logMin + (logMax - logMin) * t)
+  }
+  return out
+}
+
+/**
+ * Position of a frequency along the band axis, 0..1. Inverse of the mapping
+ * above, so axis ticks land where the bands actually are.
+ */
+export function frequencyToAxis(hz: number, fMin = F_MIN, fMax = F_MAX): number {
+  const logMin = Math.log(fMin)
+  const logMax = Math.log(fMax)
+  return (Math.log(Math.max(hz, 1e-6)) - logMin) / (logMax - logMin)
+}
+
+/**
  * Loudness-ish weighting: human hearing rolls off hard at the bottom, so raw
  * band energy makes every visual bass-dominated. A gentle tilt across the band
  * range evens it out without the complexity of a real A-weighting curve.

@@ -11,6 +11,9 @@
 import { createBarsMode } from './modes/bars'
 import { createWinampMode } from './modes/winamp'
 import { createYinYangMode } from './modes/yinYang'
+import { createKaleidoscopeMode } from './modes/kaleidoscope'
+import { createWarpStarsMode } from './modes/warpStars'
+import { createAuroraMode } from './modes/aurora'
 import { createFlowFieldMode } from './modes/flowField'
 import { createLavaLampMode } from './modes/lavaLamp'
 import { createReactionDiffusionMode } from './modes/reactionDiffusion'
@@ -26,6 +29,9 @@ const FACTORIES: VisualModeFactory[] = [
   createTilingMode,
   createTerrainMode,
   createYinYangMode,
+  createAuroraMode,
+  createKaleidoscopeMode,
+  createWarpStarsMode,
   createWinampMode,
   createBarsMode,
 ]

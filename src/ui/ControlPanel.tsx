@@ -19,6 +19,8 @@
  */
 import { useState } from 'react'
 import { MODES } from '../render/registry'
+import { CORNERS } from '../store/settings'
+import type { Corner } from '../store/settings'
 import type { ParamSchema, ParamValue, ParamValues } from '../render/types'
 import { ParamPanel } from './ParamPanel'
 import { PalettePicker } from './PalettePicker'
@@ -62,6 +64,20 @@ interface ControlPanelProps {
   onRotateModes: (on: boolean) => void
   onRotatePalettes: (on: boolean) => void
   onRotateSeconds: (seconds: number) => void
+
+  showNowPlaying: boolean
+  onShowNowPlaying: (on: boolean) => void
+  nowPlayingCorner: Corner
+  onNowPlayingCorner: (corner: Corner) => void
+  nowPlayingSize: number
+  onNowPlayingSize: (size: number) => void
+
+  showSpectrum: boolean
+  onShowSpectrum: (on: boolean) => void
+  spectrumCorner: Corner
+  onSpectrumCorner: (corner: Corner) => void
+  spectrumSize: number
+  onSpectrumSize: (size: number) => void
 
   spotify: React.ReactNode
 }
@@ -193,7 +209,7 @@ export function ControlPanel(props: ControlPanelProps) {
           </div>
         </Section>
 
-        <Section id="params" title="Mode settings" defaultOpen>
+        <Section id="params" title="Mode settings">
           <ParamPanel
             schema={props.schema}
             values={props.params}
@@ -202,9 +218,37 @@ export function ControlPanel(props: ControlPanelProps) {
           />
         </Section>
 
-        <Section id="spotify" title="Spotify" defaultOpen>{props.spotify}</Section>
+        <Section id="overlays" title="Overlays">
+          <div className="flex flex-col gap-3">
+            <OverlayControls
+              label="Audio spectrum"
+              hint="Live frequency readout of whatever the source is producing."
+              shortcut="A"
+              visible={props.showSpectrum}
+              onVisible={props.onShowSpectrum}
+              corner={props.spectrumCorner}
+              onCorner={props.onSpectrumCorner}
+              size={props.spectrumSize}
+              onSize={props.onSpectrumSize}
+            />
+            <div className="h-px bg-white/10" />
+            <OverlayControls
+              label="Now Playing"
+              hint="Needs a connected Spotify session with a track."
+              shortcut="N"
+              visible={props.showNowPlaying}
+              onVisible={props.onShowNowPlaying}
+              corner={props.nowPlayingCorner}
+              onCorner={props.onNowPlayingCorner}
+              size={props.nowPlayingSize}
+              onSize={props.onNowPlayingSize}
+            />
+          </div>
+        </Section>
 
-        <Section id="shortcuts" title="Shortcuts" defaultOpen>
+        <Section id="spotify" title="Spotify">{props.spotify}</Section>
+
+        <Section id="shortcuts" title="Shortcuts">
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] text-white/40">
             <Shortcut keys="C / ⇧C" label="Next / previous palette" />
             <Shortcut keys="S / ⇧S" label="Next / previous mode" />
@@ -213,9 +257,85 @@ export function ControlPanel(props: ControlPanelProps) {
             <Shortcut keys="H" label="Hide this panel" />
             <Shortcut keys="D" label="Debug scope" />
             <Shortcut keys="M" label="Compact / sidebar menu" />
+            <Shortcut keys="N" label="Now Playing card" />
+            <Shortcut keys="A" label="Audio spectrum monitor" />
           </dl>
         </Section>
       </div>
+    </div>
+  )
+}
+
+/** Visibility, corner and size — the same three controls every overlay wants. */
+function OverlayControls({
+  label,
+  hint,
+  shortcut,
+  visible,
+  onVisible,
+  corner,
+  onCorner,
+  size,
+  onSize,
+}: {
+  label: string
+  hint: string
+  shortcut: string
+  visible: boolean
+  onVisible: (on: boolean) => void
+  corner: Corner
+  onCorner: (corner: Corner) => void
+  size: number
+  onSize: (size: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="flex cursor-pointer items-center justify-between gap-2">
+        <span className="text-xs text-white/75">
+          {label} <span className="font-mono text-[10px] text-white/30">{shortcut}</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={visible}
+          onChange={(e) => onVisible(e.target.checked)}
+          className="h-3.5 w-3.5 accent-white/80"
+        />
+      </label>
+      <span className="text-[10px] leading-snug text-white/30">{hint}</span>
+
+      {/* Corner and size are only meaningful once it is on screen. */}
+      {visible && (
+        <>
+          <select
+            value={corner}
+            onChange={(e) => onCorner(e.target.value as Corner)}
+            className="rounded border border-white/15 bg-black/60 px-2 py-1 text-xs"
+          >
+            {CORNERS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <label className="flex flex-col gap-1">
+            <span className="flex items-baseline justify-between gap-2 text-xs text-white/70">
+              Size
+              <span className="font-mono text-[10px] tabular-nums text-white/40">
+                {size.toFixed(2)}x
+              </span>
+            </span>
+            <input
+              type="range"
+              min={0.6}
+              max={2}
+              step={0.05}
+              value={size}
+              onChange={(e) => onSize(Number(e.target.value))}
+              className="h-1 w-full cursor-pointer appearance-none rounded bg-white/15 accent-white/80"
+            />
+          </label>
+        </>
+      )}
     </div>
   )
 }
@@ -288,7 +408,7 @@ function Section({
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
-  const storageKey = `amb-section-v2-${id}`
+  const storageKey = `amb-section-v3-${id}`
   const [open, setOpen] = useState(() => {
     try {
       const saved = sessionStorage.getItem(storageKey)

@@ -11,6 +11,28 @@ import { DEFAULT_MODE_ID } from '../render/registry'
 import type { ParamValue, ParamValues } from '../render/types'
 import { DEFAULT_PALETTE } from '../signal/palettes'
 
+/** Where a floating overlay sits. Shared by every corner-docked panel. */
+export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export const CORNERS: { value: Corner; label: string }[] = [
+  { value: 'top-left', label: 'Top left' },
+  { value: 'top-right', label: 'Top right' },
+  { value: 'bottom-left', label: 'Bottom left' },
+  { value: 'bottom-right', label: 'Bottom right' },
+]
+
+/** Tailwind cannot see runtime strings, so corners map to explicit classes. */
+export const CORNER_CLASS: Record<Corner, string> = {
+  'top-left': 'top-4 left-4',
+  'top-right': 'top-4 right-4',
+  'bottom-left': 'bottom-4 left-4',
+  'bottom-right': 'bottom-4 right-4',
+}
+
+function clampSize(size: number): number {
+  return Math.max(0.6, Math.min(2, Math.round(size * 20) / 20))
+}
+
 interface SettingsState {
   modeId: string
   paletteId: string
@@ -36,6 +58,13 @@ interface SettingsState {
   menuLayout: 'sidebar' | 'compact'
   /** Show the Now Playing card when Spotify has a track. */
   showNowPlaying: boolean
+  nowPlayingCorner: Corner
+  /** Multiplier on the card's base width. */
+  nowPlayingSize: number
+  /** Live spectrum readout of whatever the audio source is producing. */
+  showSpectrum: boolean
+  spectrumCorner: Corner
+  spectrumSize: number
   /**
    * Spotify app client id. Not a secret — it appears in the authorize URL of
    * every Spotify web app — but it is per-deployment, so it is a setting
@@ -56,6 +85,13 @@ interface SettingsState {
   setSpotifyClientId: (id: string) => void
   toggleMenuLayout: () => void
   setShowNowPlaying: (on: boolean) => void
+  toggleNowPlaying: () => void
+  setNowPlayingCorner: (corner: Corner) => void
+  setNowPlayingSize: (size: number) => void
+  setShowSpectrum: (on: boolean) => void
+  toggleSpectrum: () => void
+  setSpectrumCorner: (corner: Corner) => void
+  setSpectrumSize: (size: number) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -73,6 +109,11 @@ export const useSettings = create<SettingsState>()(
       spotifyClientId: '',
       menuLayout: 'sidebar',
       showNowPlaying: true,
+      nowPlayingCorner: 'top-right',
+      nowPlayingSize: 1,
+      showSpectrum: false,
+      spectrumCorner: 'bottom-right',
+      spectrumSize: 1,
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -102,6 +143,13 @@ export const useSettings = create<SettingsState>()(
           menuLayout: state.menuLayout === 'sidebar' ? 'compact' : 'sidebar',
         })),
       setShowNowPlaying: (on) => set({ showNowPlaying: on }),
+      toggleNowPlaying: () => set((state) => ({ showNowPlaying: !state.showNowPlaying })),
+      setNowPlayingCorner: (corner) => set({ nowPlayingCorner: corner }),
+      setNowPlayingSize: (size) => set({ nowPlayingSize: clampSize(size) }),
+      setShowSpectrum: (on) => set({ showSpectrum: on }),
+      toggleSpectrum: () => set((state) => ({ showSpectrum: !state.showSpectrum })),
+      setSpectrumCorner: (corner) => set({ spectrumCorner: corner }),
+      setSpectrumSize: (size) => set({ spectrumSize: clampSize(size) }),
     }),
     {
       name: 'ambient-visualizer-settings',

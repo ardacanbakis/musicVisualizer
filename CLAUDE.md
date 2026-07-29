@@ -134,7 +134,8 @@ src/
   ui/
     ControlPanel.tsx  sidebar layout; dockable, collapsible sections
     CompactBar.tsx    the alternative layout: a bottom strip for driving it
-    NowPlaying.tsx    album art + interpolated progress, opposite the sidebar
+    NowPlaying.tsx    album art + interpolated progress; corner and size
+    spectrumMonitor.ts  live labelled spectrum of the incoming audio (A)
     SpotifyPanel.tsx  connect/setup; errors appear HERE and nowhere else
     debugOverlay.ts the debug scope (press D)
     ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
@@ -250,6 +251,10 @@ npm test           # vitest, the pure DSP
 npm run build      # tsc -b && vite build
 npm run typecheck
 ```
+
+Press **A** for the spectrum monitor — the incoming spectrum on a labelled Hz
+axis, meant to be left on screen. It is deliberately separate from the debug
+scope: one is a readable instrument, the other is a wall of internals.
 
 Press **D** in the app for the debug scope (bands, flux vs threshold, onsets,
 level, beat phase, BPM and confidence). It stays in the shipped app on purpose:

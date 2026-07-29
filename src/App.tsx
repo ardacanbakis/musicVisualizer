@@ -15,8 +15,9 @@ import { BUILT_IN_PALETTES, cyclePaletteId, paletteById } from './signal/palette
 import { Stage } from './render/stage'
 import { MODES, createMode, cycleModeId, modeEntry } from './render/registry'
 import type { VisualMode } from './render/types'
-import { resolveParams, useSettings } from './store/settings'
+import { CORNER_CLASS, resolveParams, useSettings } from './store/settings'
 import { DebugScope } from './ui/debugOverlay'
+import { SpectrumMonitor } from './ui/spectrumMonitor'
 import { ControlPanel } from './ui/ControlPanel'
 import { CompactBar } from './ui/CompactBar'
 import { NowPlaying } from './ui/NowPlaying'
@@ -38,6 +39,9 @@ export function App() {
   const stageRef = useRef<Stage | null>(null)
   const modeRef = useRef<VisualMode | null>(null)
   const scopeRef = useRef<DebugScope | null>(null)
+  const spectrumRef = useRef<SpectrumMonitor | null>(null)
+  const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
+  const spectrumVisibleRef = useRef(false)
   const spotifyRef = useRef<SpotifyClient | null>(null)
   const paramsRef = useRef(resolveParams(useSettings.getState().modeId, {}))
   const debugVisibleRef = useRef(false)
@@ -54,6 +58,11 @@ export function App() {
   const spotifyClientId = useSettings((s) => s.spotifyClientId)
   const menuLayout = useSettings((s) => s.menuLayout)
   const showNowPlaying = useSettings((s) => s.showNowPlaying)
+  const nowPlayingCorner = useSettings((s) => s.nowPlayingCorner)
+  const nowPlayingSize = useSettings((s) => s.nowPlayingSize)
+  const showSpectrum = useSettings((s) => s.showSpectrum)
+  const spectrumCorner = useSettings((s) => s.spectrumCorner)
+  const spectrumSize = useSettings((s) => s.spectrumSize)
 
   const setMode = useSettings((s) => s.setMode)
   const setPalette = useSettings((s) => s.setPalette)
@@ -68,6 +77,13 @@ export function App() {
   const setSpotifyClientId = useSettings((s) => s.setSpotifyClientId)
   const toggleMenuLayout = useSettings((s) => s.toggleMenuLayout)
   const setShowNowPlaying = useSettings((s) => s.setShowNowPlaying)
+  const toggleNowPlaying = useSettings((s) => s.toggleNowPlaying)
+  const setNowPlayingCorner = useSettings((s) => s.setNowPlayingCorner)
+  const setNowPlayingSize = useSettings((s) => s.setNowPlayingSize)
+  const setShowSpectrum = useSettings((s) => s.setShowSpectrum)
+  const toggleSpectrum = useSettings((s) => s.toggleSpectrum)
+  const setSpectrumCorner = useSettings((s) => s.setSpectrumCorner)
+  const setSpectrumSize = useSettings((s) => s.setSpectrumSize)
 
   const fullscreen = useFullscreen()
   const entry = modeEntry(modeId)
@@ -125,6 +141,9 @@ export function App() {
       stage.present(signal.dt)
       if (debugVisibleRef.current) {
         scopeRef.current?.draw(signal, bus.audioDebug, bus.sourceLabel, stage.sampleLuminance())
+      }
+      if (spectrumVisibleRef.current) {
+        spectrumRef.current?.draw(signal, bus.sourceLabel)
       }
     }
     raf = requestAnimationFrame(loop)
@@ -226,6 +245,13 @@ export function App() {
   }, [rotateModes, rotatePalettes, rotateSeconds])
 
   useEffect(() => {
+    spectrumVisibleRef.current = showSpectrum
+    if (showSpectrum && spectrumCanvasRef.current && !spectrumRef.current) {
+      spectrumRef.current = new SpectrumMonitor(spectrumCanvasRef.current)
+    }
+  }, [showSpectrum])
+
+  useEffect(() => {
     debugVisibleRef.current = debugVisible
     if (debugVisible && debugCanvasRef.current && !scopeRef.current) {
       scopeRef.current = new DebugScope(debugCanvasRef.current)
@@ -292,11 +318,17 @@ export function App() {
         case 'm':
           toggleMenuLayout()
           break
+        case 'n':
+          toggleNowPlaying()
+          break
+        case 'a':
+          toggleSpectrum()
+          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleDebug, togglePanel, toggleMenuLayout, fullscreen])
+  }, [toggleDebug, togglePanel, toggleMenuLayout, toggleNowPlaying, toggleSpectrum, fullscreen])
 
   // --- microphone ----------------------------------------------------------
   const enableMic = useCallback(async () => {
@@ -434,6 +466,18 @@ export function App() {
               onRotateModes={setRotateModes}
               onRotatePalettes={setRotatePalettes}
               onRotateSeconds={setRotateSeconds}
+              showNowPlaying={showNowPlaying}
+              onShowNowPlaying={setShowNowPlaying}
+              nowPlayingCorner={nowPlayingCorner}
+              onNowPlayingCorner={setNowPlayingCorner}
+              nowPlayingSize={nowPlayingSize}
+              onNowPlayingSize={setNowPlayingSize}
+              showSpectrum={showSpectrum}
+              onShowSpectrum={setShowSpectrum}
+              spectrumCorner={spectrumCorner}
+              onSpectrumCorner={setSpectrumCorner}
+              spectrumSize={spectrumSize}
+              onSpectrumSize={setSpectrumSize}
               spotify={
                 <SpotifyPanel
                   clientId={spotifyClientId}
@@ -448,21 +492,6 @@ export function App() {
             />
           ) : null}
         </div>
-
-        {/* Now Playing sits opposite the sidebar so the two never collide. */}
-        {showNowPlaying && spotifyStatus.track && (
-          <div
-            className={`flex shrink-0 pb-3 ${
-              dock === 'right' ? 'justify-start' : 'justify-end'
-            }`}
-          >
-            <NowPlaying
-              track={spotifyStatus.track}
-              progress={progress}
-              side={dock === 'right' ? 'left' : 'right'}
-            />
-          </div>
-        )}
 
         {panelVisible && menuLayout === 'compact' && (
           <div className="flex shrink-0 justify-center pb-2">
@@ -488,6 +517,27 @@ export function App() {
           </div>
         )}
       </div>
+
+      {/* Corner-docked overlays. Positioned absolutely rather than inside the
+          layout column so the user can put them in any corner, including the
+          one the sidebar is in — that is their call, not the layout's. */}
+      {showNowPlaying && spotifyStatus.track && (
+        <div className={`absolute ${CORNER_CLASS[nowPlayingCorner]}`}>
+          <NowPlaying
+            track={spotifyStatus.track}
+            progress={progress}
+            size={nowPlayingSize}
+          />
+        </div>
+      )}
+
+      <canvas
+        ref={spectrumCanvasRef}
+        className={`absolute ${CORNER_CLASS[spectrumCorner]} rounded-xl border border-white/10 bg-black/60 backdrop-blur-md ${
+          showSpectrum ? 'block' : 'hidden'
+        }`}
+        style={{ width: `${17 * spectrumSize}rem`, height: `${7 * spectrumSize}rem` }}
+      />
 
       <canvas
         ref={debugCanvasRef}
