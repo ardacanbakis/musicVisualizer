@@ -24,6 +24,16 @@ import { NowPlaying } from './ui/NowPlaying'
 import { Footer } from './ui/Footer'
 import { GearIcon } from './ui/icons'
 import { useFullscreen } from './ui/useFullscreen'
+import { useIdle } from './ui/useIdle'
+import { useWakeLock } from './ui/useWakeLock'
+import {
+  SETTLE_FRAMES,
+  SETTLE_MAX_MS,
+  captureFilename,
+  clampCaptureScale,
+  downloadBlob,
+} from './render/capture'
+import type { CaptureRequest } from './render/capture'
 import { SpotifyPanel } from './ui/SpotifyPanel'
 import { SpotifyClient } from './spotify/client'
 import type { SpotifyStatus } from './spotify/client'
@@ -42,6 +52,7 @@ export function App() {
   const spectrumRef = useRef<SpectrumMonitor | null>(null)
   const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
   const spectrumVisibleRef = useRef(false)
+  const captureRef = useRef<CaptureRequest | null>(null)
   const spotifyRef = useRef<SpotifyClient | null>(null)
   const paramsRef = useRef(resolveParams(useSettings.getState().modeId, {}))
   const debugVisibleRef = useRef(false)
@@ -63,6 +74,8 @@ export function App() {
   const showSpectrum = useSettings((s) => s.showSpectrum)
   const spectrumCorner = useSettings((s) => s.spectrumCorner)
   const spectrumSize = useSettings((s) => s.spectrumSize)
+  const autoHide = useSettings((s) => s.autoHide)
+  const wakeLockEnabled = useSettings((s) => s.wakeLock)
 
   const setMode = useSettings((s) => s.setMode)
   const setPalette = useSettings((s) => s.setPalette)
@@ -84,6 +97,8 @@ export function App() {
   const toggleSpectrum = useSettings((s) => s.toggleSpectrum)
   const setSpectrumCorner = useSettings((s) => s.setSpectrumCorner)
   const setSpectrumSize = useSettings((s) => s.setSpectrumSize)
+  const setAutoHide = useSettings((s) => s.setAutoHide)
+  const setWakeLock = useSettings((s) => s.setWakeLock)
 
   const fullscreen = useFullscreen()
   const entry = modeEntry(modeId)
@@ -99,6 +114,14 @@ export function App() {
     paletteDetail: null,
   })
   const [progress, setProgress] = useState<number | null>(null)
+  const [pointerOverChrome, setPointerOverChrome] = useState(false)
+  const [capturing, setCapturing] = useState(false)
+
+  // Chrome hides after 3s idle; hovering it counts as activity so a panel does
+  // not vanish out from under the pointer while its value is being read.
+  const idle = useIdle(3000, autoHide, pointerOverChrome || capturing)
+  const wakeLock = useWakeLock(wakeLockEnabled)
+  const chromeHidden = idle
 
   // --- one-time setup: stage, bus, render loop -----------------------------
   useEffect(() => {
@@ -139,6 +162,51 @@ export function App() {
       // Everything the mode drew went into the scene buffer. This is what
       // actually reaches the canvas, with the luminance clamp applied.
       stage.present(signal.dt)
+
+      // Still export. Handled here rather than in a callback because feedback
+      // modes need real frames at the target size to rebuild their buffers —
+      // see render/capture.ts.
+      const capture = captureRef.current
+      if (capture) {
+        if (!capture.started) {
+          capture.started = true
+          const scale = clampCaptureScale(
+            capture.scale,
+            stage.width,
+            stage.height,
+            stage.maxTextureSize,
+          )
+          capture.scale = scale
+          if (scale > 1) {
+            stage.setSize(
+              window.innerWidth,
+              window.innerHeight,
+              (window.devicePixelRatio || 1) * scale,
+              true,
+            )
+            modeRef.current?.resize(stage.width, stage.height, stage.dpr)
+            // Start the clock after the resize, not at the click: allocating
+            // the larger buffers is itself slow and should not eat the settle.
+            capture.deadline = now + SETTLE_MAX_MS
+          } else {
+            // 1x needs no settling: the buffer already holds the live frame.
+            capture.remaining = 0
+          }
+        } else if (capture.remaining > 0 && now < capture.deadline) {
+          capture.remaining--
+        } else {
+          captureRef.current = null
+          canvas.toBlob((blob) => capture.resolve(blob), 'image/png')
+          if (capture.scale > 1) {
+            stage.setSize(
+              window.innerWidth,
+              window.innerHeight,
+              window.devicePixelRatio || 1,
+            )
+            modeRef.current?.resize(stage.width, stage.height, stage.dpr)
+          }
+        }
+      }
       if (debugVisibleRef.current) {
         scopeRef.current?.draw(signal, bus.audioDebug, bus.sourceLabel, stage.sampleLuminance())
       }
@@ -269,6 +337,31 @@ export function App() {
     return () => window.clearInterval(timer)
   }, [spotifyStatus.track])
 
+  // --- still export --------------------------------------------------------
+  // Declared before the keyboard effect that depends on it: the dependency
+  // array is evaluated during render, so a later `const` would be in its TDZ.
+  const captureStill = useCallback(async (scale: number) => {
+    if (captureRef.current) return
+    setCapturing(true)
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        captureRef.current = {
+          scale,
+          remaining: scale > 1 ? SETTLE_FRAMES : 0,
+          started: false,
+          // Replaced with a real deadline once the resize has happened.
+          deadline: Number.POSITIVE_INFINITY,
+          resolve,
+        }
+      })
+      if (blob) {
+        downloadBlob(blob, captureFilename(useSettings.getState().modeId, scale))
+      }
+    } finally {
+      setCapturing(false)
+    }
+  }, [])
+
   // --- keyboard ------------------------------------------------------------
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -324,11 +417,25 @@ export function App() {
         case 'a':
           toggleSpectrum()
           break
+        case 'p':
+          // 1x only from the keyboard: it is instant and exact, where a
+          // high-resolution export takes seconds and belongs behind a button
+          // that can show it is working.
+          void captureStill(1)
+          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleDebug, togglePanel, toggleMenuLayout, toggleNowPlaying, toggleSpectrum, fullscreen])
+  }, [
+    toggleDebug,
+    togglePanel,
+    toggleMenuLayout,
+    toggleNowPlaying,
+    toggleSpectrum,
+    captureStill,
+    fullscreen,
+  ])
 
   // --- microphone ----------------------------------------------------------
   const enableMic = useCallback(async () => {
@@ -420,7 +527,7 @@ export function App() {
 
       {/* Menu hidden: one small button, positioned on its own rather than as
           a stretched child of the layout column. */}
-      {!panelVisible && (
+      {!panelVisible && !chromeHidden && (
         <button
           onClick={togglePanel}
           title="Show menu (H)"
@@ -433,7 +540,16 @@ export function App() {
         </button>
       )}
 
-      <div className="pointer-events-none absolute inset-0 flex flex-col p-4">
+      <div
+        className={`pointer-events-none absolute inset-0 flex flex-col p-4 transition-opacity duration-500 ${
+          chromeHidden ? 'opacity-0' : 'opacity-100'
+        }`}
+        onPointerEnter={() => setPointerOverChrome(true)}
+        onPointerLeave={() => setPointerOverChrome(false)}
+        // Fully non-interactive once faded out, or invisible buttons still
+        // swallow clicks meant for nothing at all.
+        style={{ visibility: chromeHidden ? 'hidden' : 'visible' }}
+      >
         {/* min-h-0 is what lets this row shrink so the footer keeps its space;
             without it the panel claims the full column and clips the footer. */}
         <div
@@ -478,6 +594,14 @@ export function App() {
               onSpectrumCorner={setSpectrumCorner}
               spectrumSize={spectrumSize}
               onSpectrumSize={setSpectrumSize}
+              autoHide={autoHide}
+              onAutoHide={setAutoHide}
+              wakeLock={wakeLockEnabled}
+              onWakeLock={setWakeLock}
+              wakeLockActive={wakeLock.active}
+              wakeLockSupported={wakeLock.supported}
+              capturing={capturing}
+              onCapture={(scale) => void captureStill(scale)}
               spotify={
                 <SpotifyPanel
                   clientId={spotifyClientId}
@@ -504,6 +628,8 @@ export function App() {
               onSwitchLayout={toggleMenuLayout}
               onClose={togglePanel}
               fullscreen={fullscreen}
+              capturing={capturing}
+              onCapture={() => void captureStill(1)}
             />
           </div>
         )}

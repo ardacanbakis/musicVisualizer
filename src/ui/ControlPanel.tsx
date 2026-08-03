@@ -79,8 +79,21 @@ interface ControlPanelProps {
   spectrumSize: number
   onSpectrumSize: (size: number) => void
 
+  autoHide: boolean
+  onAutoHide: (on: boolean) => void
+  wakeLock: boolean
+  onWakeLock: (on: boolean) => void
+  wakeLockActive: boolean
+  wakeLockSupported: boolean
+
+  capturing: boolean
+  onCapture: (scale: number) => void
+
   spotify: React.ReactNode
 }
+
+/** Export scales offered. Anything the GPU cannot allocate is clamped down. */
+const CAPTURE_SCALES = [1, 2, 4]
 
 export function ControlPanel(props: ControlPanelProps) {
   const { dock, fullscreen } = props
@@ -246,6 +259,59 @@ export function ControlPanel(props: ControlPanelProps) {
           </div>
         </Section>
 
+        <Section id="ambient" title="Ambient">
+          <div className="flex flex-col gap-2">
+            <Toggle
+              label="Hide chrome when idle"
+              checked={props.autoHide}
+              onChange={props.onAutoHide}
+            />
+            <span className="text-[10px] leading-snug text-white/30">
+              Menu, footer and overlays fade out after 3s of no input. Move the
+              mouse to bring them back.
+            </span>
+
+            <div className="h-px bg-white/10" />
+
+            <Toggle
+              label="Keep the display awake"
+              checked={props.wakeLock}
+              onChange={props.onWakeLock}
+            />
+            <span className="text-[10px] leading-snug text-white/30">
+              {!props.wakeLockSupported
+                ? 'Not available in this browser — the screen may still sleep.'
+                : props.wakeLock && props.wakeLockActive
+                  ? 'Wake lock held.'
+                  : props.wakeLock
+                    ? 'Requesting — granted once the tab is visible and focused.'
+                    : 'Off. The system screensaver applies.'}
+            </span>
+          </div>
+        </Section>
+
+        <Section id="capture" title="Export still">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-1.5">
+              {CAPTURE_SCALES.map((scale) => (
+                <button
+                  key={scale}
+                  onClick={() => props.onCapture(scale)}
+                  disabled={props.capturing}
+                  className="flex-1 rounded-lg border border-white/15 px-2 py-1.5 text-xs text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+                >
+                  {scale}x
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] leading-snug text-white/30">
+              {props.capturing
+                ? 'Rendering at full size…'
+                : 'Saves a PNG. Above 1x the mode is re-rendered larger and given a moment to settle, so trails and patterns come out as they look now.'}
+            </span>
+          </div>
+        </Section>
+
         <Section id="spotify" title="Spotify">{props.spotify}</Section>
 
         <Section id="shortcuts" title="Shortcuts">
@@ -259,6 +325,7 @@ export function ControlPanel(props: ControlPanelProps) {
             <Shortcut keys="M" label="Compact / sidebar menu" />
             <Shortcut keys="N" label="Now Playing card" />
             <Shortcut keys="A" label="Audio spectrum monitor" />
+            <Shortcut keys="P" label="Save a still (1x)" />
           </dl>
         </Section>
       </div>

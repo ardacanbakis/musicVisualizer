@@ -16,6 +16,7 @@ import { BUILT_IN_PALETTES } from '../signal/palettes'
 import { rgbToHex } from '../signal/color'
 import { MODES } from '../render/registry'
 import {
+  CameraIcon,
   ChevronIcon,
   CloseIcon,
   ExitFullscreenIcon,
@@ -32,6 +33,9 @@ interface CompactBarProps {
   onSwitchLayout: () => void
   onClose: () => void
   fullscreen: { isFullscreen: boolean; supported: boolean; toggle: () => void }
+  /** 1x only here — see the sidebar for high-resolution exports. */
+  capturing: boolean
+  onCapture: () => void
 }
 
 export function CompactBar(props: CompactBarProps) {
@@ -104,6 +108,13 @@ export function CompactBar(props: CompactBarProps) {
       <span className="h-5 w-px shrink-0 bg-white/10" />
 
       <div className="flex shrink-0 items-center gap-0.5">
+        <RoundButton
+          onClick={props.onCapture}
+          disabled={props.capturing}
+          title="Save a still (P)"
+        >
+          <CameraIcon />
+        </RoundButton>
         <RoundButton onClick={props.onSwitchLayout} title="Sidebar menu (M)">
           <SidebarIcon />
         </RoundButton>
@@ -126,10 +137,12 @@ export function CompactBar(props: CompactBarProps) {
 function RoundButton({
   onClick,
   title,
+  disabled = false,
   children,
 }: {
   onClick: () => void
   title: string
+  disabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -137,7 +150,8 @@ function RoundButton({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className="rounded-full p-1.5 text-white/40 transition hover:bg-white/10 hover:text-white/90"
+      disabled={disabled}
+      className="rounded-full p-1.5 text-white/40 transition hover:bg-white/10 hover:text-white/90 disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
     </button>

@@ -126,9 +126,22 @@ export class Stage implements RenderContext {
     )
   }
 
-  /** @param cssWidth/@param cssHeight in CSS pixels; dpr is capped internally. */
-  setSize(cssWidth: number, cssHeight: number, devicePixelRatio: number): void {
-    this.dpr = Math.min(MAX_DPR, Math.max(1, devicePixelRatio))
+  /**
+   * @param cssWidth/@param cssHeight in CSS pixels.
+   * @param devicePixelRatio capped at MAX_DPR unless `allowOversize` is set,
+   *        which the still export uses to render above screen resolution.
+   *        Note `setSize(..., false)` leaves the CSS size alone, so growing
+   *        the drawing buffer does not reflow the page.
+   */
+  setSize(
+    cssWidth: number,
+    cssHeight: number,
+    devicePixelRatio: number,
+    allowOversize = false,
+  ): void {
+    this.dpr = allowOversize
+      ? Math.max(1, devicePixelRatio)
+      : Math.min(MAX_DPR, Math.max(1, devicePixelRatio))
     this.renderer.setPixelRatio(this.dpr)
     this.renderer.setSize(cssWidth, cssHeight, false)
     this.width = Math.max(1, Math.round(cssWidth * this.dpr))
@@ -182,6 +195,12 @@ export class Stage implements RenderContext {
   /** Run the luminance clamp and put the frame on the canvas. Call once per frame. */
   present(dt: number): void {
     this.limiter.present(dt, this.reducedMotion)
+  }
+
+  /** Largest texture this GL context will allocate. Used to clamp exports. */
+  get maxTextureSize(): number {
+    const gl = this.renderer.getContext()
+    return gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
   }
 
   /** Debug only — costs a pipeline stall. */

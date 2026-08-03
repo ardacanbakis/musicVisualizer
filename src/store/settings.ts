@@ -65,6 +65,10 @@ interface SettingsState {
   showSpectrum: boolean
   spectrumCorner: Corner
   spectrumSize: number
+  /** Hide the menu and footer after 3s of no input. The primary use case. */
+  autoHide: boolean
+  /** Screen Wake Lock, so an unattended display does not sleep. */
+  wakeLock: boolean
   /**
    * Spotify app client id. Not a secret — it appears in the authorize URL of
    * every Spotify web app — but it is per-deployment, so it is a setting
@@ -92,6 +96,8 @@ interface SettingsState {
   toggleSpectrum: () => void
   setSpectrumCorner: (corner: Corner) => void
   setSpectrumSize: (size: number) => void
+  setAutoHide: (on: boolean) => void
+  setWakeLock: (on: boolean) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -114,6 +120,8 @@ export const useSettings = create<SettingsState>()(
       showSpectrum: false,
       spectrumCorner: 'bottom-right',
       spectrumSize: 1,
+      autoHide: true,
+      wakeLock: true,
 
       setMode: (id) => set({ modeId: id }),
       setPalette: (id) => set({ paletteId: id }),
@@ -150,6 +158,8 @@ export const useSettings = create<SettingsState>()(
       toggleSpectrum: () => set((state) => ({ showSpectrum: !state.showSpectrum })),
       setSpectrumCorner: (corner) => set({ spectrumCorner: corner }),
       setSpectrumSize: (size) => set({ spectrumSize: clampSize(size) }),
+      setAutoHide: (on) => set({ autoHide: on }),
+      setWakeLock: (on) => set({ wakeLock: on }),
     }),
     {
       name: 'ambient-visualizer-settings',

@@ -124,6 +124,7 @@ src/
     registry.ts     one array; add a mode here
     params.ts       schema defaults merged with saved overrides
     paletteTexture.ts  palette, ramp, band and waveform textures; shared
+    capture.ts      still export: scale clamping, filenames, the settle rule
     modes/          one file per mode
   spotify/          optional; the app is complete without any of it
     auth.ts         OAuth PKCE — no client secret, deployable as a static site
@@ -141,6 +142,8 @@ src/
     ParamPanel.tsx  the generated settings UI; never hand-write a mode's panel
     PalettePicker.tsx  swatch grid; palettes are picked by sight, not by name
     Footer.tsx      social links; visible whenever the menu is
+    useIdle.ts      idle detection for the auto-hide, with a hold
+    useWakeLock.ts  wake lock, re-acquired on visibilitychange
   store/
     settings.ts     zustand + localStorage
 ```
@@ -225,6 +228,33 @@ buffer. Only the luminance limiter draws to the glass, so no mode can bypass
 the clamp — that is the point of putting it in the stage rather than asking
 every mode to behave.
 
+## Still export
+
+The hard part is not encoding a PNG.
+
+Several modes keep their picture in a feedback buffer — flow-field trails,
+reaction-diffusion, the lava lamp's heat field. **Resizing the drawing buffer
+destroys that state.** So rendering one frame at 4× and grabbing it gives you a
+picture of a reaction-diffusion that started a sixtieth of a second ago: a
+seeded grid, not the pattern on screen.
+
+So a high-resolution capture resizes and then lets the *normal render loop* run
+at the new size for `SETTLE_FRAMES` before grabbing. Real time passes, feedback
+buffers re-accumulate, and trails come out looking like what you were watching.
+It is capped by wall clock as well as frame count (`SETTLE_MAX_MS`) — the frame
+count assumes something near 60 Hz, and a 4× export on a weak GPU can drop to a
+few frames a second, at which point 110 frames is most of a minute of an app
+that looks hung.
+
+A 1× capture skips all of it: `preserveDrawingBuffer: true` means the buffer
+already holds the live frame, so it is grabbed directly and is exact.
+
+Scale is clamped against `MAX_TEXTURE_SIZE` up front. Exceeding it does not
+throw — it silently yields an incomplete framebuffer and a black image.
+
+Resizing passes `allowOversize` and leaves the CSS size alone, so growing the
+drawing buffer does not reflow the page.
+
 ## Ambient behaviour requirements
 
 These are features, not polish:
@@ -238,8 +268,15 @@ These are features, not polish:
   give a genuinely calmer variant, not the same animation slightly slower.
 - Must survive 8+ hours without leaking. Dispose every geometry, material,
   texture and framebuffer on mode switch. Device pixel ratio is capped at 2.
-- Chrome auto-hides after 3 s of mouse idle. Screen Wake Lock so the display
-  does not sleep. Render loop pauses entirely when the tab is hidden.
+- ✅ Chrome auto-hides after 3 s of mouse idle (`ui/useIdle.ts`), and the whole
+  overlay layer goes `visibility: hidden` at the end of the fade so invisible
+  buttons cannot swallow clicks. Resting the pointer on the chrome holds it
+  open — a panel must not vanish out from under someone reading a value.
+- ✅ Screen Wake Lock (`ui/useWakeLock.ts`). The browser **releases the lock
+  whenever the document becomes hidden and does not re-acquire it**, so a
+  one-shot request works until the first tab switch and then silently stops
+  working. Re-acquiring on `visibilitychange` is the entire job.
+- Render loop pauses entirely when the tab is hidden.
 - An expired or revoked Spotify token degrades silently to the no-Spotify state.
   **Never show an error wall** — this thing lives on a wall.
 
@@ -261,6 +298,10 @@ level, beat phase, BPM and confidence). It stays in the shipped app on purpose:
 when a mode misbehaves the first question is always "is the signal wrong or is
 the shader wrong?", and this answers it in about two seconds.
 
+Press **P** to save the current frame as a PNG. The keyboard is 1× only —
+that is instant and exact, where a 2× or 4× export takes seconds and belongs
+behind a button that can show it is working. Those live in the panel.
+
 ## Build order
 
 1. ✅ Signal bus, synthetic LFO source, trivial renderer (colour bars)
@@ -272,11 +313,14 @@ the shader wrong?", and this answers it in about two seconds.
    (a fireplace mode was built and then removed at the user's request; it is
    in git history if it is ever wanted back)
 5. ✅ Spotify auth, polling, palette extraction, crossfade
-6. Ambient shell — auto-hide on idle, wake lock
+6. ✅ Ambient shell — auto-hide on idle, wake lock
    (fullscreen, the settings show/hide toggle and auto-rotate landed early;
    auto-rotate fades the incoming mode up from black rather than a true
    two-mode crossfade, which would need both modes live at once)
-7. Frame capture and high-resolution still export
+7. ✅ Frame capture and high-resolution still export
+
+The roadmap is complete. Anything from here is a new mode (one file, one
+import) or a change to something already listed above.
 
 Modes are listed in `src/render/registry.ts`; the fireplace was removed at the
 user's request and is recoverable from git history.
